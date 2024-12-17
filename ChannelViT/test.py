@@ -69,7 +69,7 @@ if __name__ == '__main__':
     data = data_loader.get_data()
 
     # Split data into training and validation sets
-    train_data, val_data = train_test_split(data, test_size=0.2, random_state=42)
+    train_data, val_data = train_test_split(data, test_size=0.3, random_state=42)
 
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
@@ -83,7 +83,7 @@ if __name__ == '__main__':
     val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=20, shuffle=False)
 
     device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
-    device = 'cpu'
+    #device = 'mps'
     # Load the model
     model = so2sat_channelvit_small_p8_with_hcs_random_split_supervised(pretrained=False)
 
@@ -116,6 +116,8 @@ if __name__ == '__main__':
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            torch.save(model.state_dict(), 'finetuned_model'+str(epoch)+'.pth')
+
             print(epoch, k)
 
         print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item()}")
