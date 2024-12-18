@@ -79,8 +79,8 @@ if __name__ == '__main__':
     train_dataset = PVDataset(train_data, channels=[0, 1, 2], transform=transform, scale=1)
     val_dataset = PVDataset(val_data, channels=[0, 1, 2], transform=transform, scale=1)
 
-    train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=20, shuffle=True)
-    val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=20, shuffle=False)
+    train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=15, shuffle=True)
+    val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=15, shuffle=False)
 
     device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
     #device = 'mps'
@@ -111,16 +111,16 @@ if __name__ == '__main__':
             # Forward pass
             outputs = model(images, extra_tokens=metadata)
             loss = criterion(outputs, metadata['labels'])
-            k = k+1
+            k = k+15
             # Backward pass and optimization
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            torch.save(model.state_dict(), 'finetuned_model'+str(epoch)+'.pth')
-
+            torch.mps.empty_cache()
             print(epoch, k)
 
         print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item()}")
+        torch.save(model.state_dict(), 'finetuned_model'+str(epoch)+'.pth')
 
     print("Fine-tuning complete.")
     # Save the fine-tuned model

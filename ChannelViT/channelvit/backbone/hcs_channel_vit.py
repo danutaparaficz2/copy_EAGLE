@@ -217,7 +217,7 @@ class ChannelVisionTransformer(nn.Module):
                 1, int(math.sqrt(N)), int(math.sqrt(N)), dim
             ).permute(0, 3, 1, 2),
             scale_factor=(w0 / math.sqrt(N), h0 / math.sqrt(N)),
-            mode="bicubic",
+            mode="nearest",
         )
         assert (
             int(w0) == patch_pos_embed.shape[-2]
