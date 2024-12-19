@@ -1,71 +1,21 @@
 import torch
-from typing import List, Union
 from torch.optim import Adam
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
-from PIL import Image
-import numpy as np
+
 from torch.utils.data.dataloader import default_collate
 from sklearn.model_selection import train_test_split
 import pandas as pd
-from sklearn.metrics import f1_score, accuracy_score
 PYTORCH_ENABLE_MPS_FALLBACK=1
 from hubconf import camelyon_channelvit_small_p8_with_hcs_supervised, so2sat_channelvit_small_p8_with_hcs_random_split_supervised
-
-class Load_Data:
-    def __init__(self, path):
-        self.path = path
-        self.df = pd.read_pickle(self.path)
-        self.df = self.df[self.df.labels >= 0]
-        self.labels = self.df.labels.unique()
-        self.labels_as_integers = [int(label) for label in self.df['labels'].values]
-        self.images = [image.astype(np.uint8) for image in list(self.df.images.values)]
-        self.data = list(zip(self.images, self.labels_as_integers))
-
-    def get_data(self):
-        return self.data
-    
-class PVDataset(torch.utils.data.Dataset):
-    def __init__(self, df, channels, transform=None, scale=1):
-        self.df = df
-        self.channels = channels
-        self.transform = transform
-        self.scale = scale
-
-    def __getitem__(self, idx):
-        row = self.df[idx]
-        img_hwc = Image.fromarray(row[0])
-        # Apply data augmentation
-        img_chw = self.transform(img_hwc)
-
-        # Select the specified channels
-        if isinstance(img_chw, list):
-            img_chw = [img[self.channels, :, :] for img in img_chw]
-        else:
-            img_chw = img_chw[self.channels, :, :]
-
-        # Scale the channels if needed
-        if self.scale != 1:
-            if isinstance(img_chw, list):
-                img_chw = [c * self.scale for c in img_chw]
-            else:
-                img_chw *= self.scale
-        self.channels = torch.tensor([c for c in self.channels])
-        return img_chw, {"labels": row[1], "channels": self.channels}
-
-    def __len__(self):
-        return len(self.df)
-    
-    @staticmethod
-    def collate_fn(batch):
-        """Filter out bad examples (None) within the batch."""
-        batch = list(filter(lambda example: example is not None, batch))
-        return default_collate(batch)
+#### Local imports
+from load_data import Load_Data, PVDataset
+from utils import compute_metrics
 
 if __name__ == '__main__':
     # Usage
     path = "/Users/danuta.paraficz/PycharmProjects/eagle-classification/Data/Duramat_no_pool_labels.pkl"
-    data_loader = Load_Data(path)
+    data_loader =  Load_Data(path)
     data = data_loader.get_data()
 
     # Split data into training and validation sets
@@ -83,7 +33,6 @@ if __name__ == '__main__':
     val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=15, shuffle=False)
 
     device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
-    #device = 'mps'
     # Load the model
     model = so2sat_channelvit_small_p8_with_hcs_random_split_supervised(pretrained=False)
 
@@ -105,12 +54,16 @@ if __name__ == '__main__':
    
     for epoch in range(num_epochs):
         k=0
-        for images, metadata in train_dataloader:
-            images, metadata = images.to(device), {k: v.to(device) for k, v in metadata.items()}
+        for data in train_dataloader:
+            data = {k: v.to(device) for k, v in data.items()}
+          #  keys_to_select = ['channels', 'labels']
 
+            # Create a new dictionary with only the selected keys
+           # selected_dict = {key: data[key] for key in keys_to_select if key in data}
+          #  print(selected_dict)  # Output: {'a': 1, 'c': 3}
             # Forward pass
-            outputs = model(images, extra_tokens=metadata)
-            loss = criterion(outputs, metadata['labels'])
+            outputs = model(data["images"], extra_tokens=data)
+            loss = criterion(outputs, data['labels'])
             k = k+15
             # Backward pass and optimization
             optimizer.zero_grad()
@@ -126,27 +79,19 @@ if __name__ == '__main__':
     # Save the fine-tuned model
     torch.save(model.state_dict(), 'finetuned_model.pth')
 
-    def compute_metrics(predicted, orgin_labels):
-        labels = orgin_labels
-        preds = predicted
-        acc = accuracy_score(labels, preds)
-        f1 = f1_score(labels, preds, average='weighted')
-        return {
-            'accuracy': acc,
-            'f1': f1
-        }
+
 
     # Evaluate the model
     model.eval()
     correct = 0
     total = 0
     with torch.no_grad():
-        for images, metadata in val_dataloader:
-            images, metadata = images.to(device), {k: v.to(device) for k, v in metadata.items()}
-            outputs = model(images, extra_tokens=metadata)
+        for data in val_dataloader:
+            data =  {k: v.to(device) for k, v in data.items()}
+            outputs = model(data, extra_tokens=data)
             _, predicted = torch.max(outputs.data, 1)
-            total += metadata['labels'].size(0)
-            correct += (predicted == metadata['labels']).sum().item()
+            total += data['labels'].size(0)
+            correct += (predicted == data['labels']).sum().item()
             print(correct)
 
     accuracy = 100 * correct / total
