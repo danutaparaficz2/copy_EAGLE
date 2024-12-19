@@ -2,3 +2,5 @@ working/
 myenv/
 Data/
 outputs/
+*__pycache__/
+ChannelViT/__pycache__/

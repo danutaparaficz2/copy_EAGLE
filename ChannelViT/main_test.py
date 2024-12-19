@@ -14,23 +14,26 @@ from utils import compute_metrics
 from transformers import TrainingArguments, Trainer
 
 
-from transformers import Trainer
-
-from transformers import Trainer
-
-from transformers import Trainer
 
 class CustomTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
-        images = inputs.pop('images')
-        labels = inputs.pop('labels')
-        outputs = model(images, extra_tokens=inputs)
+
+        labels = inputs['labels']
+        outputs = model(inputs['images'], extra_tokens=inputs)
         loss = self.label_smoother(outputs, labels) if self.label_smoother is not None else self.compute_loss_function(outputs, labels)
         return (loss, outputs) if return_outputs else loss
 
     def compute_loss_function(self, outputs, labels):
         return torch.nn.functional.cross_entropy(outputs, labels)
-from torch.utils.data.dataloader import default_collate
+    def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
+
+        labels = inputs['labels']
+        with torch.no_grad():
+            outputs = model(inputs['images'], extra_tokens=inputs)
+        if prediction_loss_only:
+            loss = self.compute_loss_function(outputs, labels)
+            return (loss, None, None)
+        return (None, outputs, labels)
 
 def custom_collate_fn(examples):
     images = torch.stack([example['images'] for example in examples])
@@ -45,7 +48,7 @@ if __name__ == '__main__':
     data = data_loader.get_data()
 
     # Split data into training and validation sets
-    train_data, val_data = train_test_split(data, test_size=0.3, random_state=42)
+    train_data, val_data = train_test_split(data, test_size=0.9, random_state=42)
 
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
@@ -54,11 +57,6 @@ if __name__ == '__main__':
     ])
     train_dataset = PVDataset(train_data, channels=[0, 1, 2], transform=transform, scale=1)
     val_dataset = PVDataset(val_data, channels=[0, 1, 2], transform=transform, scale=1)
-
-    # from datasets import Dataset
-    # ds_train = Dataset.from_dict({"image": train_dataset['images'], "labels": train_dataset['labels'],"channels": train_dataset['channels']})
-    # ds_val = Dataset.from_dict({"image": val_dataset['images'], "labels": val_dataset['labels'], "channels": val_dataset['channels']})
-
 
 
     device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
@@ -86,11 +84,7 @@ if __name__ == '__main__':
                                     remove_unused_columns=False,
                                     push_to_hub=False,
                                     load_best_model_at_end=True)
-    # # Training loop
-    # def collate_fn(examples):
-    #     images = [example['images'] for example in examples]
-    #     rest = {k: default_collate([example[k] for example in examples]) for k in examples[0] if k != 'images'}
-    #     return images, rest
+
     trainer = CustomTrainer(
         model=model,
         args=training_args,
@@ -105,21 +99,7 @@ if __name__ == '__main__':
     # Save the fine-tuned model
     # torch.save(model.state_dict(), 'finetuned_model.pth')
 
-
-
-    # Evaluate the model
-    model.eval()
-    correct = 0
-    total = 0
-    with torch.no_grad():
-        for images, metadata in val_dataloader:
-            images, metadata = images.to(device), {k: v.to(device) for k, v in metadata.items()}
-            outputs = model(images, extra_tokens=metadata)
-            _, predicted = torch.max(outputs.data, 1)
-            total += metadata['labels'].size(0)
-            correct += (predicted == metadata['labels']).sum().item()
-            print(correct)
-
-    accuracy = 100 * correct / total
-    print(f'Validation Accuracy: {accuracy:.2f}%')
+    predictions = trainer.predict(val_dataset) 
+    predlabels = predictions.predictions.argmax(axis=-1)
+    predictions.metrics
     print('END')
