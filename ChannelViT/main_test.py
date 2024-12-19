@@ -83,6 +83,7 @@ if __name__ == '__main__':
                                     save_total_limit=2,
                                     remove_unused_columns=False,
                                     push_to_hub=False,
+                                    metric_for_best_model='accuracy',
                                     load_best_model_at_end=True)
 
     trainer = CustomTrainer(
