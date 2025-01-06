@@ -1,0 +1,3 @@
+[submodule "eagle-jsonhandler"]
+	path = eagle-jsonhandler
+	url = https://research-git.ffhs.ch/ffhs-lws/eagle-jsonhandler

@@ -25,6 +25,7 @@ class CustomTrainer(Trainer):
 
     def compute_loss_function(self, outputs, labels):
         return torch.nn.functional.cross_entropy(outputs, labels)
+    
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
 
         labels = inputs['labels']
@@ -34,7 +35,8 @@ class CustomTrainer(Trainer):
             loss = self.compute_loss_function(outputs, labels)
             return (loss, None, None)
         return (None, outputs, labels)
-
+    
+# we need to collate the data to be able to use multiple inputs images and labels and channels
 def custom_collate_fn(examples):
     images = torch.stack([example['images'] for example in examples])
     rest = {k: default_collate([example[k] for example in examples]) for k in examples[0] if k != 'images'}
@@ -46,6 +48,8 @@ if __name__ == '__main__':
     path = "/Users/danuta.paraficz/PycharmProjects/eagle-classification/Data/Duramat_no_pool_labels.pkl"
     data_loader =  Load_Data(path)
     data = data_loader.get_data()
+# this is an alternative way of loading the pretrained model
+    # model = torch.hub.load('insitro/ChannelViT', 'imagenet_channelvit_small_p16_with_hcs_supervised', pretrained=True, map_location=torch.device('cpu'))
 
     # Split data into training and validation sets
     train_data, val_data = train_test_split(data, test_size=0.9, random_state=42)
@@ -76,7 +80,7 @@ if __name__ == '__main__':
                                     per_device_eval_batch_size=batch_size,
                                     evaluation_strategy='epoch',
                                     save_strategy='epoch',
-                                    num_train_epochs=6,
+                                    num_train_epochs=2,
                                     fp16=True if torch.cuda.is_available() else False,
                                     logging_steps=logging_steps,
                                     learning_rate=1e-5,
@@ -96,11 +100,29 @@ if __name__ == '__main__':
     )
 
     train_result = trainer.train()
-    print("Fine-tuning complete.")
+    import matplotlib.pyplot as plt
     # Save the fine-tuned model
-    # torch.save(model.state_dict(), 'finetuned_model.pth')
+    torch.save(model.state_dict(), 'finetuned_model.pth')
+    # Load the fine-tuned model for evaluation
+    model.load_state_dict(torch.load('finetuned_model.pth', map_location=device))
+    model.eval()
+    # Plot the loss function for training and evaluation data
+    train_loss = train_result.training_loss
+    eval_loss = trainer.evaluate().get('eval_loss')
+    # Save the training loss to a file
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(train_result.global_step, train_loss, label='Training Loss')
+    plt.plot(train_result.global_step, eval_loss, label='Evaluation Loss')
+    plt.xlabel('Steps')
+    plt.ylabel('Loss')
+    plt.title('Training and Evaluation Loss')
+    plt.legend()
+    plt.show()
+    print("Fine-tuning complete.")
+
 
     predictions = trainer.predict(val_dataset) 
     predlabels = predictions.predictions.argmax(axis=-1)
-    predictions.metrics
+    print(predictions.metrics)
     print('END')
