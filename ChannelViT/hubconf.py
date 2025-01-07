@@ -24,7 +24,6 @@ def imagenet_channelvit_small_p16_with_hcs_supervised(pretrained=True, *args, **
     Pretrained Supervised ChannelViT-Small model (patch size = 16) trained on ImageNet
     """
 
-    exit()
     model = hcs_channelvit_small(patch_size=16, in_chans=3, *args, **kwargs)
     if pretrained:
         model.load_state_dict(
