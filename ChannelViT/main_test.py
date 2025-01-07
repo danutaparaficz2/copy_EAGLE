@@ -49,7 +49,7 @@ if __name__ == '__main__':
     data_loader =  Load_Data(path)
     data = data_loader.get_data()
     # this is an alternative way of loading the pretrained model
-    model = torch.hub.load('insitro/ChannelViT', 'imagenet_channelvit_small_p16_with_hcs_supervised', pretrained=True, map_location=torch.device('cpu'))
+    # model = torch.hub.load('insitro/ChannelViT', 'imagenet_channelvit_small_p16_with_hcs_supervised', pretrained=True, map_location=torch.device('cpu'))
 
     # Split data into training and validation sets
     train_data, val_data = train_test_split(data, test_size=0.9, random_state=42)
@@ -65,11 +65,11 @@ if __name__ == '__main__':
 
     device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
     # Load the model
-    # model = so2sat_channelvit_small_p8_with_hcs_random_split_supervised(pretrained=False)
+    model = so2sat_channelvit_small_p8_with_hcs_random_split_supervised(pretrained=False)
 
     # Load the pretrained weights and map them to the appropriate device
-    # state_dict = torch.load('Data/so2sat_channelvit_small_p8_with_hcs_hard_split_supervised.pth', map_location=device)
-    # model.load_state_dict(state_dict)
+    state_dict = torch.load('../Data/so2sat_channelvit_small_p8_with_hcs_hard_split_supervised.pth', map_location=device)
+    model.load_state_dict(state_dict)
 
     # Move the model to the appropriate device
     model.to(device)
