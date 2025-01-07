@@ -4,3 +4,4 @@ Data/
 outputs/
 *__pycache__/
 ChannelViT/__pycache__/
+requirements.txt
