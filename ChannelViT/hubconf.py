@@ -19,6 +19,7 @@ def imagenet_channelvit_small_p16_DINO(pretrained=True, *args, **kwargs):
     model.eval()
     return model
 
+
 def imagenet_channelvit_small_p16_with_hcs_supervised(pretrained=True, *args, **kwargs):
     """
     Pretrained Supervised ChannelViT-Small model (patch size = 16) trained on ImageNet
