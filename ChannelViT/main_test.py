@@ -48,8 +48,8 @@ if __name__ == '__main__':
     path = "/Users/danuta.paraficz/PycharmProjects/eagle-classification/Data/Duramat_no_pool_labels.pkl"
     data_loader =  Load_Data(path)
     data = data_loader.get_data()
-# this is an alternative way of loading the pretrained model
-    # model = torch.hub.load('insitro/ChannelViT', 'imagenet_channelvit_small_p16_with_hcs_supervised', pretrained=True, map_location=torch.device('cpu'))
+    # this is an alternative way of loading the pretrained model
+    model = torch.hub.load('insitro/ChannelViT', 'imagenet_channelvit_small_p16_with_hcs_supervised', pretrained=True, map_location=torch.device('cpu'))
 
     # Split data into training and validation sets
     train_data, val_data = train_test_split(data, test_size=0.9, random_state=42)
