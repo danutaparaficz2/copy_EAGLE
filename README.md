@@ -1,12 +1,24 @@
 # EAGLE Classification
 
 
+## Installation
 
-## Getting started
+1. **Clone the repository**:
+    ```sh
+    git clone https://research-git.ffhs.ch/ffhs-lws/eagle-classification.git
+    cd eagle_segmentation
+    ```
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+2. **Create a virtual environment**:
+    ```sh
+    python -m venv eagle_conda
+    source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+    ```
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+3. **Install the required packages**:
+    ```sh
+    pip install -r requirements.txt
+    ```
 
 ## Add your files
 
