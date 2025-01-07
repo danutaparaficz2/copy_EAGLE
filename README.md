@@ -1,11 +1,18 @@
 # EAGLE Classification
 
+## Machine Venus (all data are there)
+#### Configure VS for Venus:
+- Click on bottom left corner green Botton
+- Then on the top middle choose “connect to Host”
+- Choose “Venus-eagle”
+
+
 
 ## Installation
 
 1. **Clone the repository**:
     ```sh
-    git clone https://research-git.ffhs.ch/ffhs-lws/eagle-classification.git
+    git clone --recurse-submodules https://research-git.ffhs.ch/ffhs-lws/eagle-classification.git
     cd eagle_segmentation
     ```
 
