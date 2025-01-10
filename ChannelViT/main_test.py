@@ -113,10 +113,10 @@ if __name__ == '__main__':
     train_result = trainer.train()
     # # Save the fine-tuned model
     torch.save(model.state_dict(), '/Data/finetuned_model_Duramat.pth')
-    ploting_training_results()
+    ploting_training_results(current_dir)
 
     # Load the fine-tuned model for evaluation
-    model = so2sat_channelvit_small_p8_with_hcs_random_split_supervised(pretrained=False)
+    model = hcs_channelvit_small(patch_size=8, in_chans=18)
     model.load_state_dict(torch.load(current_dir+'/Data/finetuned_model_Duramat.pth', map_location=device))
     model.eval()
 
