@@ -2,6 +2,9 @@ import torch
 import pandas as pd
 from PIL import Image
 import numpy as np
+import sys
+import os
+import importlib
 
 class Load_Data:
     def __init__(self, path):
@@ -15,7 +18,34 @@ class Load_Data:
 
     def get_data(self):
         return self.data
-    
+
+class Load_Data_Handler:
+    def __init__(self, PATH):
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        sys.path.append(os.path.join(current_dir, '../eagle-jsonhandler'))
+        sys.path.append(os.path.join(current_dir, '../'))
+        eagle_jsonhandler = importlib.import_module("JSONHandler")
+        
+        panellist = eagle_jsonhandler.getGroupedPanelList(PATH+'/overviews/')
+        classified_cells = eagle_jsonhandler.getCellsByAttribute(groupedPanels=panellist, attribute="classifiedBy", values="Ralf")
+        elpaths, uvpaths, vispaths, labels = eagle_jsonhandler.getCellsImagePathsAndLabels(classified_cells)
+        label_types = ["good", "crack", "cross", "dark", "corrosion"]
+        label_counts = np.sum(labels, axis=0)
+        for i, count in enumerate(label_counts):
+            print(f"Label {i}: {count} ({label_types[i]})")
+
+        self.images_el = [np.array(Image.open(PATH+'/segments/'+path).convert('L')) for path in elpaths]
+        self.images_uv = [np.array(Image.open(PATH+'/segments/'+path).convert('L')) for path in uvpaths]
+        self.images_vis = [np.array(Image.open(PATH+'/segments/'+path).convert('L')) for path in vispaths]
+        
+        # Combine the 3 lists of grayscale images into one list of RGB images
+        self.images = [np.stack((el, uv, vis), axis=-1) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
+        self.labels_as_integers = [np.argmax(label) for label in labels]
+        self.data = list(zip(self.images, self.labels_as_integers))
+
+    def get_data(self):
+        return self.data
+       
 class PVDataset(torch.utils.data.Dataset):
     def __init__(self, df, channels, transform=None, scale=1):
         self.df = df

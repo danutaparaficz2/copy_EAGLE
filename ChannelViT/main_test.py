@@ -2,25 +2,26 @@ import torch
 from torch.optim import Adam
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
-
+import numpy as np
 from torch.utils.data.dataloader import default_collate
 from sklearn.model_selection import train_test_split
 import pandas as pd
 PYTORCH_ENABLE_MPS_FALLBACK=1
 from hubconf import camelyon_channelvit_small_p8_with_hcs_supervised, so2sat_channelvit_small_p8_with_hcs_random_split_supervised
+from channelvit.backbone.hcs_channel_vit import hcs_channelvit_small
 #### Local imports
-from load_data import Load_Data, PVDataset
-from utils import compute_metrics
+from load_data import Load_Data, PVDataset, Load_Data_Handler
+from utils import compute_metrics, ploting_training_results
 from transformers import TrainingArguments, Trainer
-
-
+import matplotlib.pyplot as plt
+import os
 
 class CustomTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
 
         labels = inputs['labels']
         outputs = model(inputs['images'], extra_tokens=inputs)
-        loss = self.label_smoother(outputs, labels) if self.label_smoother is not None else self.compute_loss_function(outputs, labels)
+        loss =  self.compute_loss_function(outputs, labels)
         return (loss, outputs) if return_outputs else loss
 
     def compute_loss_function(self, outputs, labels):
@@ -44,15 +45,22 @@ def custom_collate_fn(examples):
     
 
 if __name__ == '__main__':
+
+    current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
     # Usage
+
     path = "/Users/eagle/FFHS/eagle-bfe - data/Duramat_no_pool_labels.pkl"
     data_loader =  Load_Data(path)
     data = data_loader.get_data()
-    # this is an alternative way of loading the pretrained model
-    # model = torch.hub.load('insitro/ChannelViT', 'imagenet_channelvit_small_p16_with_hcs_supervised', pretrained=True, map_location=torch.device('cpu'))
+ 
+
+    # PATH_DATA = "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage"
+    # data_loader_2 = Load_Data_Handler(PATH_DATA)
+    # data = data_loader_2.get_data()
 
     # Split data into training and validation sets
-    train_data, val_data = train_test_split(data, test_size=0.9, random_state=42)
+    train_data, val_data = train_test_split(data, test_size=0.3, random_state=42)
 
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
@@ -63,12 +71,13 @@ if __name__ == '__main__':
     val_dataset = PVDataset(val_data, channels=[0, 1, 2], transform=transform, scale=1)
 
 
-    device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
-    # Load the model
-    model = so2sat_channelvit_small_p8_with_hcs_random_split_supervised(pretrained=False)
+    # this is an alternative way of loading the pretrained model (it doesn't work in Venus)
+    # model = torch.hub.load('insitro/ChannelViT', 'imagenet_channelvit_small_p16_with_hcs_supervised', pretrained=True, map_location=torch.device('cpu'))
 
+    # Load the model
+    model = hcs_channelvit_small(patch_size=8, in_chans=18)
     # Load the pretrained weights and map them to the appropriate device
-    state_dict = torch.load('../Data/so2sat_channelvit_small_p8_with_hcs_hard_split_supervised.pth', map_location=device)
+    state_dict = torch.load(current_dir+'/Data/so2sat_channelvit_small_p8_with_hcs_hard_split_supervised.pth', map_location=device)
     model.load_state_dict(state_dict)
 
     # Move the model to the appropriate device
@@ -78,9 +87,9 @@ if __name__ == '__main__':
     training_args = TrainingArguments(output_dir='./working/',
                                     per_device_train_batch_size=batch_size,
                                     per_device_eval_batch_size=batch_size,
-                                    evaluation_strategy='epoch',
+                                    eval_strategy='epoch',
                                     save_strategy='epoch',
-                                    num_train_epochs=2,
+                                    num_train_epochs=15,
                                     fp16=True if torch.cuda.is_available() else False,
                                     logging_steps=logging_steps,
                                     learning_rate=1e-5,
@@ -88,7 +97,9 @@ if __name__ == '__main__':
                                     remove_unused_columns=False,
                                     push_to_hub=False,
                                     metric_for_best_model='accuracy',
-                                    load_best_model_at_end=True)
+                                    load_best_model_at_end=True,
+                                    logging_dir='./logs',  # Directory for storing logs
+                                    ) 
 
     trainer = CustomTrainer(
         model=model,
@@ -100,29 +111,26 @@ if __name__ == '__main__':
     )
 
     train_result = trainer.train()
-    import matplotlib.pyplot as plt
-    # Save the fine-tuned model
-    torch.save(model.state_dict(), 'finetuned_model.pth')
+    # # Save the fine-tuned model
+    torch.save(model.state_dict(), '/Data/finetuned_model_Duramat.pth')
+    ploting_training_results()
+
     # Load the fine-tuned model for evaluation
-    model.load_state_dict(torch.load('finetuned_model.pth', map_location=device))
+    model = so2sat_channelvit_small_p8_with_hcs_random_split_supervised(pretrained=False)
+    model.load_state_dict(torch.load(current_dir+'/Data/finetuned_model_Duramat.pth', map_location=device))
     model.eval()
-    # Plot the loss function for training and evaluation data
-    train_loss = train_result.training_loss
-    eval_loss = trainer.evaluate().get('eval_loss')
-    # Save the training loss to a file
 
-    plt.figure(figsize=(10, 5))
-    plt.plot(train_result.global_step, train_loss, label='Training Loss')
-    plt.plot(train_result.global_step, eval_loss, label='Evaluation Loss')
-    plt.xlabel('Steps')
-    plt.ylabel('Loss')
-    plt.title('Training and Evaluation Loss')
-    plt.legend()
-    plt.show()
-    print("Fine-tuning complete.")
-
-
+    ############################## PREDICT ##############################
     predictions = trainer.predict(val_dataset) 
     predlabels = predictions.predictions.argmax(axis=-1)
     print(predictions.metrics)
-    print('END')
+    print('END Duramat')
+
+    ########## INFINITY ##########
+    path = os.path.dirname(current_dir)+"/eagle-labelling/features_pickle/Infinity_all_no_pool_labels.pkl"
+    data_loader =  Load_Data(path)
+    data = data_loader.get_data()
+    predictions = trainer.predict(data) 
+    predlabels = predictions.predictions.argmax(axis=-1)
+    print(predictions.metrics)
+    print('END Duramat')
