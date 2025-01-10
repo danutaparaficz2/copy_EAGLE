@@ -41,10 +41,10 @@ def plot_samples(ds_val, predictions, predlabels, correct=True):
     plt.show()
 
 
-def ploting_training_results():
+def ploting_training_results(current_dir):
 
     # Plot the loss function for training and evaluation data
-    with open('/Users/eagle/Documents/eagle-classification/Data/working/checkpoint-48/trainer_state.json', 'r') as f:
+    with open(current_dir+'/Data/working/checkpoint-48/trainer_state.json', 'r') as f:
         logs = json.load(f)
     # Extract training and validation losses
     # Extract the log history
@@ -65,5 +65,5 @@ def ploting_training_results():
     plt.ylabel('Loss')
     plt.legend()
     plt.title('Training and Validation Loss')
-    plt.savefig('/Users/eagle/Documents/eagle-classification/Data/loss_plot.png')
+    plt.savefig(current_dir+'/Data/loss_plot.png')
     plt.close()
