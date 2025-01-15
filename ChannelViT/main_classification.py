@@ -1,19 +1,14 @@
 import torch
-from torch.optim import Adam
-from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
-import numpy as np
 from torch.utils.data.dataloader import default_collate
 from sklearn.model_selection import train_test_split
-import pandas as pd
 PYTORCH_ENABLE_MPS_FALLBACK=1
 from hubconf import camelyon_channelvit_small_p8_with_hcs_supervised, so2sat_channelvit_small_p8_with_hcs_random_split_supervised
 from channelvit.backbone.hcs_channel_vit import hcs_channelvit_small
 #### Local imports
-from load_data import Load_Data, PVDataset, Load_Data_Handler
-from utils import compute_metrics, ploting_training_results
+from load_data import Load_Data, PVDataset
+from utils import compute_metrics, ploting_training_results, plot_samples
 from transformers import TrainingArguments, Trainer
-import matplotlib.pyplot as plt
 import os
 
 class CustomTrainer(Trainer):
@@ -50,7 +45,9 @@ if __name__ == '__main__':
 
     current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
-
+    init_weigths_name = 'so2sat_channelvit_small_p8_with_hcs_hard_split_supervised'
+    num_train_epochs = 2
+    output_folder = '/Data/model_with_'+init_weigths_name+'/epochs_'+str(num_train_epochs)+'/'
     ######################################### Load the data ##################################################
 
     path = "/Users/eagle/FFHS/eagle-bfe - data/Duramat_no_pool_labels.pkl"
@@ -81,7 +78,7 @@ if __name__ == '__main__':
     # Load the model
     model = hcs_channelvit_small(patch_size=8, in_chans=18)
     # Load the pretrained weights and map them to the appropriate device
-    state_dict = torch.load(current_dir+'/Data/so2sat_channelvit_small_p8_with_hcs_hard_split_supervised.pth', map_location=device)
+    state_dict = torch.load(current_dir+'/Data/'+init_weigths_name+'.pth', map_location=device)
     model.load_state_dict(state_dict)
     # Move the model to the appropriate device
     model.to(device)
@@ -90,12 +87,12 @@ if __name__ == '__main__':
 
     batch_size = 20
     logging_steps = len(train_data) // batch_size
-    training_args = TrainingArguments(output_dir='./working_new/',
+    training_args = TrainingArguments(output_dir='.'+output_folder,
                                     per_device_train_batch_size=batch_size,
                                     per_device_eval_batch_size=batch_size,
                                     evaluation_strategy='epoch',
                                     save_strategy='epoch',
-                                    num_train_epochs=10,
+                                    num_train_epochs=num_train_epochs,
                                     fp16=True if torch.cuda.is_available() else False,
                                     logging_steps=logging_steps,
                                     learning_rate=1e-5,
@@ -116,28 +113,31 @@ if __name__ == '__main__':
     )
 
     ######################################## ONLY TRAINING MODE #########################################
-    train_result = trainer.train()
-    predictions = trainer.predict(val_dataset) 
-    predlabels = predictions.predictions.argmax(axis=-1)
-    print(predictions)
-    print(predictions.metrics)
-    print('END Duramat direct')
+    # train_result = trainer.train()
+    # print('!!!!!!!!!!!END TRAINING!!!!!!!!!!')
 
-    # Save the trained model
-    trainer.save_model('./Data/finetuned_model_Duramat_new/')  # This saves the model, tokenizer, and training arguments
-    # Save the train result metrics
-    trainer.save_metrics("train", train_result.metrics)
-    # Save the state of the trainer
-    trainer.save_state()
-    # Extract the state_dict from the trained model
-    trained_state_dict = trainer.model.state_dict()
-    torch.save(trained_state_dict, './Data/finetuned_model_Duramat_new/trained_state_dict.pth')
+    # predictions = trainer.predict(val_dataset) 
+    # predlabels = predictions.predictions.argmax(axis=-1)
+    # print(predictions)
+    # print(predictions.metrics)
+    # print('END Duramat direct')
+
+    # # Save the trained model
+    # trainer.save_model(current_dir+output_folder)  # This saves the model, tokenizer, and training arguments
+    # # Save the train result metrics
+    # trainer.save_metrics("train", train_result.metrics)
+    # # Save the state of the trainer
+    # trainer.save_state()
+    # # Extract the state_dict from the trained model
+    # trained_state_dict = trainer.model.state_dict()
+    # torch.save(trained_state_dict, current_dir+output_folder+'trained_state_dict.pth')
+    # ploting_training_results(trainer, current_dir+output_folder)
 
     ########################################### PREDICT ###########################################
     ########## Duramat ##########
     # Load the trained model back into the trainer
     model = hcs_channelvit_small(patch_size=8, in_chans=18)
-    model.load_state_dict(torch.load('./Data/finetuned_model_Duramat_new/trained_state_dict.pth', map_location=device))
+    model.load_state_dict(torch.load(current_dir+output_folder+'trained_state_dict.pth', map_location=device))
     model.to(device)
     #This method is used to set the model to evaluation mode. It is important to call this method before running inference, 
     # because the model needs to know that it is in evaluation mode so that it can turn off features like dropout and batch normalization.
@@ -151,19 +151,25 @@ if __name__ == '__main__':
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
     )
+    
     # Use the trainer to make predictions
     predictions = trainer.predict(val_dataset)
     predlabels = predictions.predictions.argmax(axis=-1)
     print(predictions)
     print(predictions.metrics)
     print('END Duramat loaded model')
+    plot_samples(val_dataset, predlabels, correct=True, data_name='Duramat')
+    plot_samples(val_dataset, predlabels, correct=False, data_name='Duramat')
+
 
     ########## INFINITY ##########
     path = os.path.dirname(current_dir)+"/eagle-labelling/features_pickle/Infinity_all_no_pool_labels.pkl"
     data_loader =  Load_Data(path)
     data = data_loader.get_data()
-    data = PVDataset(data, channels=[0, 1, 2], transform=transform, scale=1)
-    predictions = trainer.predict(data) 
+    val_dataset = PVDataset(data, channels=[0, 1, 2], transform=transform, scale=1)
+    predictions = trainer.predict(val_dataset) 
     predlabels = predictions.predictions.argmax(axis=-1)
+    plot_samples(val_dataset, predlabels, correct=True)
+    plot_samples(val_dataset, predlabels, correct=False)
     print(predictions.metrics)
     print('END Infinity')

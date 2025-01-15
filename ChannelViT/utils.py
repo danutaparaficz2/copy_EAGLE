@@ -17,31 +17,32 @@ def compute_metrics(p: EvalPrediction):
         'f1': f1,
     }
 
-def plot_samples(ds_val, predictions, predlabels, correct=True):
+def plot_samples(ds_val, predlabels, correct=True, data_name='Unknown'):
     fig, ax = plt.subplots(6, 6, sharex=True, sharey=True, figsize=(20,20))
     idx = -1
     for i in range(6):
         for j in range(6):
             while True:
+                idx = np.random.choice(len(ds_val), 1, replace=False)
                 if correct:
-                    idx = np.random.choice(ds_val.shape[0], 1, replace=False)
-                    if ds_val[int(idx[0])]["labels"] > 0 and ds_val[int(idx[0])]["labels"] == predlabels[int(idx[0])]:
+                    if ds_val[int(idx[0])]["labels"]> 0 and ds_val[int(idx[0])]["labels"] == int(predlabels[int(idx[0])]):
                         break
                 else:
-                    for id in np.where(ds_val['labels'] != predlabels)[0]:
-                        if id > idx:
-                            idx = int(id)
-                            break
-                    if idx > -1:
+                    if ds_val[int(idx[0])]["labels"] != int(predlabels[int(idx[0])]):
                         break
+ 
             s = ds_val[int(idx[0])]
-            ax[i,j].imshow(np.transpose(s['image'], (1,2,0)))
-            ax[i,j].set_title(f"G: {s['labels']}\nP: {predlabels[int(idx[0])]}")
+            ax[i,j].imshow(np.transpose(s['images'], (1,2,0)))
+            ax[i,j].set_title(f"G: {s['labels']}\nP: {int(predlabels[int(idx[0])])}")
             ax[i,j].axis('off')
-    plt.show()
+    if correct:
+        flag='correct'
+    else:
+        flag='wrong'
+    plt.savefig('./Data/samples_'+data_name+'_'+flag+'.png')
 
 
-def ploting_training_results(trainer):
+def ploting_training_results(trainer, folder):
 
     # Plot the loss function for training and evaluation data
 
@@ -64,5 +65,5 @@ def ploting_training_results(trainer):
     plt.ylabel('Loss')
     plt.legend()
     plt.title('Training and Validation Loss')
-    plt.savefig('./Data/loss_plot.png')
+    plt.savefig(folder+'./Data/loss_plot.png')
     plt.close()
