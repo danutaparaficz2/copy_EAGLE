@@ -82,14 +82,14 @@ if __name__ == '__main__':
 
     # Move the model to the appropriate device
     model.to(device)
-    batch_size = 10
+    batch_size = 20
     logging_steps = len(train_data) // batch_size
-    training_args = TrainingArguments(output_dir='./working/',
+    training_args = TrainingArguments(output_dir='./working_new/',
                                     per_device_train_batch_size=batch_size,
                                     per_device_eval_batch_size=batch_size,
                                     eval_strategy='epoch',
                                     save_strategy='epoch',
-                                    num_train_epochs=15,
+                                    num_train_epochs=2,
                                     fp16=True if torch.cuda.is_available() else False,
                                     logging_steps=logging_steps,
                                     learning_rate=1e-5,
@@ -110,27 +110,79 @@ if __name__ == '__main__':
         eval_dataset=val_dataset,
     )
 
+    # Train the model
+
+    ####################### ONLY TRAINING MODE #######################
     train_result = trainer.train()
-    # # Save the fine-tuned model
-    torch.save(model.state_dict(), '/Data/finetuned_model_Duramat.pth')
-    ploting_training_results(current_dir)
 
-    # Load the fine-tuned model for evaluation
-    model = hcs_channelvit_small(patch_size=8, in_chans=18)
-    model.load_state_dict(torch.load(current_dir+'/Data/finetuned_model_Duramat.pth', map_location=device))
-    model.eval()
-
-    ############################## PREDICT ##############################
     predictions = trainer.predict(val_dataset) 
     predlabels = predictions.predictions.argmax(axis=-1)
+    print(predictions)
     print(predictions.metrics)
-    print('END Duramat')
+    print('END Duramat direct')
+
+    # Save the trained model
+    trainer.save_model('./Data/finetuned_model_Duramat_new/')  # This saves the model, tokenizer, and training arguments
+
+    # Save the train result metrics
+    trainer.save_metrics("train", train_result.metrics)
+
+    # Save the state of the trainer
+    trainer.save_state()
+
+    # Extract the state_dict from the trained model
+    trained_state_dict = trainer.model.state_dict()
+    torch.save(trained_state_dict, './Data/finetuned_model_Duramat_new/trained_state_dict.pth')
+
+
+
+    ############################## PREDICT ##############################
+
+    # Load the trained model back into the trainer
+    model = hcs_channelvit_small(patch_size=8, in_chans=18)
+    model.load_state_dict(torch.load('./Data/finetuned_model_Duramat_new/trained_state_dict.pth', map_location=device))
+    model.to(device)
+    #This method is used to set the model to evaluation mode. It is important to call this method before running inference, 
+    # because the model needs to know that it is in evaluation mode so that it can turn off features like dropout and batch normalization.
+    model.eval()
+    training_args = TrainingArguments(output_dir='./working_new/',
+                                    per_device_train_batch_size=batch_size,
+                                    per_device_eval_batch_size=batch_size,
+                                    eval_strategy='epoch',
+                                    save_strategy='epoch',
+                                    num_train_epochs=6,
+                                    fp16=True if torch.cuda.is_available() else False,
+                                    logging_steps=logging_steps,
+                                    learning_rate=1e-5,
+                                    save_total_limit=2,
+                                    remove_unused_columns=False,
+                                    push_to_hub=False,
+                                    metric_for_best_model='accuracy',
+                                    load_best_model_at_end=True,
+                                    logging_dir='./logs',  # Directory for storing logs
+                                    ) 
+
+    trainer = CustomTrainer(
+        model=model,
+        args=training_args,
+        data_collator=custom_collate_fn,
+        compute_metrics=compute_metrics,
+        train_dataset=train_dataset,
+        eval_dataset=val_dataset,
+    )
+    # Use the trainer to make predictions
+    predictions = trainer.predict(val_dataset)
+    predlabels = predictions.predictions.argmax(axis=-1)
+    print(predictions)
+    print(predictions.metrics)
+    print('END Duramat loaded model')
 
     ########## INFINITY ##########
     path = os.path.dirname(current_dir)+"/eagle-labelling/features_pickle/Infinity_all_no_pool_labels.pkl"
     data_loader =  Load_Data(path)
     data = data_loader.get_data()
+    data = PVDataset(data, channels=[0, 1, 2], transform=transform, scale=1)
     predictions = trainer.predict(data) 
     predlabels = predictions.predictions.argmax(axis=-1)
     print(predictions.metrics)
-    print('END Duramat')
+    print('END Infinity')

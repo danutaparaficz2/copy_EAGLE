@@ -41,14 +41,13 @@ def plot_samples(ds_val, predictions, predlabels, correct=True):
     plt.show()
 
 
-def ploting_training_results(current_dir):
+def ploting_training_results(trainer):
 
     # Plot the loss function for training and evaluation data
-    with open(current_dir+'/Data/working/checkpoint-48/trainer_state.json', 'r') as f:
-        logs = json.load(f)
+
     # Extract training and validation losses
     # Extract the log history
-    log_history = logs['log_history']
+    log_history = trainer.model.state_dict()['log_history']
 
     # Convert log history to DataFrame
     log_df = pd.DataFrame(log_history)
@@ -65,5 +64,5 @@ def ploting_training_results(current_dir):
     plt.ylabel('Loss')
     plt.legend()
     plt.title('Training and Validation Loss')
-    plt.savefig(current_dir+'/Data/loss_plot.png')
+    plt.savefig('./Data/loss_plot.png')
     plt.close()
