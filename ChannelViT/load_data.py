@@ -18,7 +18,17 @@ class Load_Data:
 
     def get_data(self):
         return self.data
-
+    
+    def get_label_statistics(self):
+        label_counts = {}
+        for label in self.labels_as_integers:
+            if label in label_counts:
+                label_counts[label] += 1
+            else:
+                label_counts[label] = 1
+        return label_counts
+    
+    
 class Load_Data_Handler:
     def __init__(self, PATH):
         current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -45,7 +55,16 @@ class Load_Data_Handler:
 
     def get_data(self):
         return self.data
-       
+    
+    def get_label_statistics(self):
+        label_counts = {}
+        for label in self.labels_as_integers:
+            if label in label_counts:
+                label_counts[label] += 1
+            else:
+                label_counts[label] = 1
+        return label_counts
+    
 class PVDataset(torch.utils.data.Dataset):
     def __init__(self, df, channels, transform=None, scale=1):
         self.df = df

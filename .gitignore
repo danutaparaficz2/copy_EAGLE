@@ -1,9 +1,9 @@
-working/
-working_new/
 myenv/
 venv_eagle_class/
 Data/
-outputs/
+Data_augmented/
+Augmented/
 *__pycache__/
 ChannelViT/__pycache__/
 requirements.txt
+*.log
