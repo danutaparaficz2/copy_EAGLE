@@ -47,6 +47,8 @@ if __name__ == '__main__':
     ######################################### Load the data ##################################################
 
     path = "/Users/eagle/FFHS/eagle-bfe - data/Duramat_no_pool_labels.pkl"
+    path = os.path.dirname(current_dir)+"/eagle-labelling/features_pickle/Infinity_all_no_pool_labels.pkl"
+
     data_loader =  Load_Data(path)
     datas = data_loader.get_data()
     label_counts = data_loader.get_label_statistics()
@@ -97,6 +99,8 @@ if __name__ == '__main__':
     path = os.path.dirname(current_dir)+"/eagle-labelling/features_pickle/Infinity_all_no_pool_labels.pkl"
     data_loader =  Load_Data(path)
     data = data_loader.get_data()
+    label_counts = data_loader.get_label_statistics()
+
     val_dataset = PVDataset(data, channels=[0, 1, 2], transform=transform, scale=1)
     predictions = trainer.predict(val_dataset) 
     accuracy_Infinity = predictions.metrics['test_accuracy']
