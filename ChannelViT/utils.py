@@ -22,10 +22,10 @@ def compute_metrics(p: EvalPrediction):
 
 def calculate_class_accuracy(true_labels, pred_labels, class_label):
     # Get the indices of the samples belonging to the specific class
-    class_indices = np.where(true_labels == class_label)[0]
+    class_indices = np.where(np.array(true_labels) == class_label)[0]
     
     # Get the true and predicted labels for the specific class
-    class_true_labels = true_labels[class_indices]
+    class_true_labels = np.array(true_labels)[class_indices]
     class_pred_labels = pred_labels[class_indices]
     
     # Calculate the accuracy for the specific class
