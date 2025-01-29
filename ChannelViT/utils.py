@@ -151,7 +151,10 @@ def plot_samples_from_all_labels(ds_val, predlabels, accuracy, class_accuracies,
     for label in unique_labels:
         if class_accuracies.get(label) == 0.:
             break
-        plot_samples_from_specific_label(ds_val, predlabels, label, accuracy, class_accuracies, correct, data_name, outfolder)
+        if class_accuracies.get(label) < 0.6:
+            plot_samples_from_specific_label(ds_val, predlabels, label, accuracy, class_accuracies, False, data_name, outfolder)
+        else:
+            plot_samples_from_specific_label(ds_val, predlabels, label, accuracy, class_accuracies, correct, data_name, outfolder)
 
 def plot_samples_from_specific_label(ds_val, predlabels, label_to_filter, accuracy, class_accuracies, correct=True, data_name='Unknown', outfolder='./Data'):
     fig, ax = plt.subplots(6, 6, sharex=True, sharey=True, figsize=(20,20))
