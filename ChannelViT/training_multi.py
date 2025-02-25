@@ -4,22 +4,29 @@ from sklearn.model_selection import train_test_split
 from transformers import TrainingArguments, Trainer
 from hubconf import camelyon_channelvit_small_p8_with_hcs_supervised, so2sat_channelvit_small_p8_with_hcs_random_split_supervised
 import torch
+from torch import nn
+
 from channelvit.backbone.hcs_channel_vit import hcs_channelvit_small
 
 # My libraries
 from load_data import  PVDataset
-from utils import compute_metrics, augment_underrepresented_classes
+from utils import compute_metrics_sigmoid, augment_underrepresented_classes
+
+
 
 class CustomTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
 
         labels = inputs['labels']
         outputs = model(inputs['images'], extra_tokens=inputs)
-        loss =  self.compute_loss_function(outputs, labels)
+        loss_fct = nn.BCEWithLogitsLoss()
+        # logits = outputs.logits
+
+        loss = loss_fct(outputs, labels.float())
         return (loss, outputs) if return_outputs else loss
 
     def compute_loss_function(self, outputs, labels):
-        return torch.nn.functional.cross_entropy(outputs, labels)
+        return nn.BCEWithLogitsLoss(outputs, labels)
     
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
 
@@ -60,7 +67,7 @@ def init_trainer(args, model, val_dataset, outfolder):
         model=model,
         args=training_args,
         data_collator=custom_collate_fn,
-        compute_metrics=compute_metrics,
+        compute_metrics=compute_metrics_sigmoid,
         eval_dataset = val_dataset,
     )
     return trainer
@@ -123,5 +130,17 @@ def train_save_model(trainer, train_dataset, val_dataset, outfolder):
 def load_model(args, folder, device, weights_path):
     model = hcs_channelvit_small(patch_size= args.patch_size, in_chans=args.in_chans)
     model.load_state_dict(torch.load(folder+weights_path+'.pth', map_location=device))
+    # num_classes = 4  # Replace with the actual number of classes in your dataset
+    # model.head = nn.Linear(model.norm.normalized_shape[0], num_classes)
+    # model.to(device)
+    return model
+
+  # Load the model
+def load_post_trained_model(args, folder, device, weights_path):
+    model = hcs_channelvit_small(patch_size= args.patch_size, in_chans=args.in_chans)
+    num_classes = 4  # Replace with the actual number of classes in your dataset
+    model.head = nn.Linear(model.norm.normalized_shape[0], num_classes)
+    model.load_state_dict(torch.load(folder+weights_path+'.pth', map_location=device))
+
     model.to(device)
     return model

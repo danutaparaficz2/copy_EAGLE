@@ -18,7 +18,8 @@ class Load_Data:
 
     def get_data(self):
         return self.data
-    
+    def get_just_images(self):
+        return self.images
     def get_label_statistics(self):
         label_counts = {}
         for label in self.labels_as_integers:
@@ -26,6 +27,7 @@ class Load_Data:
                 label_counts[label] += 1
             else:
                 label_counts[label] = 1
+        print(label_counts)
         return label_counts
     
     

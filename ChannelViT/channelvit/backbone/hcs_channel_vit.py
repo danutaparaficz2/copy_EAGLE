@@ -248,7 +248,9 @@ class ChannelVisionTransformer(nn.Module):
         for blk in self.blocks:
             x = blk(x)
         x = self.norm(x)
-        return x[:, 0]
+        x = x[:, 0]  # Use the CLS token
+        x = self.head(x)  # Apply the head layer
+        return x
 
     def get_last_selfattention(self, x, extra_tokens={}):
         x = self.prepare_tokens(x)

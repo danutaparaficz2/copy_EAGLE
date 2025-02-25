@@ -4,10 +4,13 @@ from transformers import  EvalPrediction
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
+import torch.nn.functional as F
+
 import random
 import os
 import json
 from PIL import Image, ImageEnhance, ImageOps
+import math
 
 def compute_metrics(p: EvalPrediction):
     preds = p.predictions.argmax(axis=-1)
@@ -19,6 +22,85 @@ def compute_metrics(p: EvalPrediction):
         'accuracy': acc,
         'f1': f1,
     }
+
+def compute_metrics_sigmoid(p):
+    preds = torch.sigmoid(torch.tensor(p.predictions)) > 0.5
+    labels = torch.tensor(p.label_ids)
+    preds = preds.cpu().numpy()
+    labels = labels.cpu().numpy()
+    acc = accuracy_score(labels, preds)
+    f1 = f1_score(labels, preds, average='weighted')
+    return {
+        'accuracy': acc,
+        'f1': f1
+    }
+
+def convert_to_one_hot(labels, num_classes=4):
+    """Convert integer labels to one-hot encoding for multi-label classification."""
+    # If labels is a list of lists, convert it to a tensor
+    if isinstance(labels, list):
+        labels = torch.tensor(labels)
+    
+    # Create a zero tensor of shape (num_samples, num_classes)
+    one_hot_labels = torch.zeros((labels.size(0), num_classes))
+    
+    # Set the appropriate elements to 1
+    for i, label_set in enumerate(labels):
+        one_hot_labels[i] = F.one_hot(label_set, num_classes=num_classes)
+    
+    return one_hot_labels.float()
+
+
+def convert_labels_to_one_hot(data):
+    converted_data = []
+    for item in data:
+        image, label = item
+        label_name = label_names()[label]
+        if '&' in label_name:
+            label_index = []
+            for label in label_name.split('&'):
+                label_index.append(list(label_names().values()).index(label))
+            label_one = convert_to_one_hot(label_index)
+            label_one = label_one.sum(axis=0)
+        else:
+            label_index = [label]
+            label_one = convert_to_one_hot(label_index)
+            label_one = label_one.sum(axis=0)
+        converted_data.append((image, label_one))
+    return converted_data
+
+def plot_samples_from_all_labels(ds, predlabels, data_name='Unknown', outfolder='./Data'):
+    unique_labels = np.unique(predlabels)
+    def select_images_by_label(ds, label):
+        selected_data = []
+        selected_predlabels = []
+        for idx, s in enumerate(ds):
+            if s['labels'][label] == 1:
+                 selected_data.append(s)
+                 selected_predlabels.append(predlabels[idx])
+            
+        return selected_data, selected_predlabels
+
+
+    for label in unique_labels:
+        selected_images, selected_predlabels = select_images_by_label(ds, label)
+        plot_samples_from_specific_label(selected_images, selected_predlabels, label, data_name, outfolder)
+
+
+def calculate_class_accuracy_one_hot(true_labels, pred_logits, class_label, threshold=0.5):
+    # Convert logits to binary predictions using the threshold
+    pred_labels = (pred_logits > threshold).astype(int)
+    
+    # Get the indices of the samples belonging to the specific class
+    class_indices = np.where(np.array(true_labels)[:, class_label] == 1)[0]
+    
+    # Get the true and predicted labels for the specific class
+    class_true_labels = np.array(true_labels)[class_indices, class_label]
+    class_pred_labels = pred_labels[class_indices, class_label]
+    
+    # Calculate the accuracy for the specific class
+    class_accuracy = accuracy_score(class_true_labels, class_pred_labels)
+    return class_accuracy
 
 def calculate_class_accuracy(true_labels, pred_labels, class_label):
     # Get the indices of the samples belonging to the specific class
@@ -146,45 +228,94 @@ def plot_samples(ds_val, predlabels, correct=True, data_name='Unknown', outfolde
         flag='wrong'
     plt.savefig(outfolder+'samples_'+data_name+'_'+flag+'.png')
 
-def plot_samples_from_all_labels(ds_val, predlabels, accuracy, class_accuracies, correct=True, data_name='Unknown', outfolder='./Data'):
-    unique_labels = np.unique([s['labels'] for s in ds_val])
-    for label in unique_labels:
-        if class_accuracies.get(label) == 0.:
-            break
-        if class_accuracies.get(label) < 0.6:
-            plot_samples_from_specific_label(ds_val, predlabels, label, accuracy, class_accuracies, False, data_name, outfolder)
-        else:
-            plot_samples_from_specific_label(ds_val, predlabels, label, accuracy, class_accuracies, correct, data_name, outfolder)
 
-def plot_samples_from_specific_label(ds_val, predlabels, label_to_filter, accuracy, class_accuracies, correct=True, data_name='Unknown', outfolder='./Data'):
-    fig, ax = plt.subplots(6, 6, sharex=True, sharey=True, figsize=(20,20))
-    idx = -1
-    for i in range(6):
-        for j in range(6):
-            while True:
-                idx = np.random.choice(len(ds_val), 1, replace=False)
-                if ds_val[int(idx[0])]["labels"] == label_to_filter:
-                    if correct:
-                        if ds_val[int(idx[0])]["labels"] == int(predlabels[int(idx[0])]):
-                            break
-                    else:
-                        if ds_val[int(idx[0])]["labels"] != int(predlabels[int(idx[0])]):
-                            break
- 
-            s = ds_val[int(idx[0])]
+def label_names():
+    return {
+        0: 'good',
+        1: 'crack',
+        2: 'cross',
+        3: 'dark',
+        4: 'crack&cross',
+        5: 'crack&dark',
+        6: 'crack&cross&dark',
+        7: 'corrosion',
+        8: 'corrosion&cross',
+        9: 'corrosion&crack&cross',
+        10: 'corrosion&crack'
+    }
+
+def count_data_per_class(data):
+    label_counts = {label: 0 for label in label_names().keys()}
+    label_namessss = {label: 0 for label in label_names().values()}
+
+    class_names = label_names()
+
+    for _, label in data:
+        label_name = class_names[label]
+        if '&' in label_name:
+            individual_labels = label_name.split('&')
+            for individual_label in individual_labels:
+                individual_label_index = list(class_names.values()).index(individual_label)
+                label_counts[individual_label_index] += 1
+                label_namessss[class_names[individual_label_index]] += 1 
+        else:
+            label_counts[label] += 1
+            label_namessss[class_names[label]] += 1 
+    # Drop labels with 0 count
+    label_counts = {label: count for label, count in label_counts.items() if count > 0}
+    label_namessss = {label: count for label, count in label_namessss.items() if count > 0}
+    print(label_counts)
+    print(label_namessss)
+    return label_counts
+        
+    # Print the counts and their label names
+    for label, count in label_counts.items():
+        if count>0:
+            print(f"{class_names[label]}: {count}")
+    return label_counts
+
+def is_prime(n):
+    """Check if a number is prime."""
+    if n <= 1:
+        return False
+    for i in range(2, int(math.sqrt(n)) + 1):
+        if n % i == 0:
+            return False
+    return True
+
+def find_optimal_grid(n):
+    """Return the optimal grid dimensions for plotting n images."""
+    for i in range(int(math.sqrt(n)), 0, -1):
+        if n % i == 0:
+            return i, n // i
+    return n, 1
+
+
+def plot_samples_from_specific_label(ds, selected_predlabels, label_to_filter, data_name='Unknown', outfolder='./Data'):
+   
+    label_name = label_names()[label_to_filter]
+    if len(ds) < 36:
+        idx = 0
+        factors = find_optimal_grid(len(ds))
+        grid1 = factors[0]
+        grid2 = factors[1]
+    else:
+        idx = np.random.choice(len(ds)-36, 1, replace=False)[0]
+        grid1 = 6
+        grid2 = 6
+    fig, ax = plt.subplots(grid1, grid2, sharex=True, sharey=True, figsize=(20,20))
+    for i in range(grid1):
+        for j in range(grid2):
+
+            s = ds[int(idx)]
             image = np.transpose(s['images'], (1, 2, 0))
             image = normalize_image(image)  # Normalize the image
             ax[i,j].imshow(image)
-            ax[i,j].set_title(f"G: {s['labels']}\nP: {int(predlabels[int(idx[0])])}", fontsize=19)
+            ax[i,j].set_title(f"Pred: {selected_predlabels[idx]}", fontsize=19)
             ax[i,j].axis('off')
-    if correct:
-        flag='correct'
-    else:
-        flag='wrong'
-    plt.suptitle(f'Total Accuracy of {data_name} is: {accuracy:.3f}. Class Accuracy: {class_accuracies.get(label_to_filter, 0):.3f}', fontsize=30)
-
-    plt.savefig(outfolder+f'/samples_{data_name}_label_{str(label_to_filter)}_{flag}.png')
-
+            idx += 1
+    plt.suptitle('Class:'+ label_name + ', from '+data_name, fontsize=29)
+    plt.savefig(outfolder+f'/samples_{data_name}_label_{label_name}.png')
 
 def find_last_checkpoint(output_dir):
     # List all checkpoint directories
@@ -227,3 +358,43 @@ def ploting_training_results(trainer, outfolder, last_checkpoint='', accuracies=
         plt.title('Validation Accuracy')
     plt.savefig(outfolder+'/loss_plot1.png')
     plt.close()
+
+def plot_samples_from_all_labels_with_acc(ds_val, predlabels, accuracy, class_accuracies, correct=True, data_name='Unknown', outfolder='./Data'):
+    unique_labels = np.unique([s['labels'] for s in ds_val])
+    for label in unique_labels:
+        if class_accuracies.get(label) == 0.:
+            break
+        if class_accuracies.get(label) < 0.6:
+            plot_samples_from_specific_label_with_acc(ds_val, predlabels, label, accuracy, class_accuracies, False, data_name, outfolder)
+        else:
+            plot_samples_from_specific_label_with_acc(ds_val, predlabels, label, accuracy, class_accuracies, correct, data_name, outfolder)
+
+def plot_samples_from_specific_label_with_acc(ds_val, predlabels, label_to_filter, accuracy, class_accuracies, correct=True, data_name='Unknown', outfolder='./Data'):
+    fig, ax = plt.subplots(6, 6, sharex=True, sharey=True, figsize=(20,20))
+    idx = -1
+    for i in range(6):
+        for j in range(6):
+            while True:
+                idx = np.random.choice(len(ds_val), 1, replace=False)
+                if ds_val[int(idx[0])]["labels"] == label_to_filter:
+                    if correct:
+                        if ds_val[int(idx[0])]["labels"] == int(predlabels[int(idx[0])]):
+                            break
+                    else:
+                        if ds_val[int(idx[0])]["labels"] != int(predlabels[int(idx[0])]):
+                            break
+ 
+            s = ds_val[int(idx[0])]
+            image = np.transpose(s['images'], (1, 2, 0))
+            image = normalize_image(image)  # Normalize the image
+            ax[i,j].imshow(image)
+            ax[i,j].set_title(f"G: {s['labels']}\nP: {int(predlabels[int(idx[0])])}", fontsize=19)
+            ax[i,j].axis('off')
+    if correct:
+        flag='correct'
+    else:
+        flag='wrong'
+    plt.suptitle(f'Total Accuracy of {data_name} is: {accuracy:.3f}. Class Accuracy: {class_accuracies.get(label_to_filter, 0):.3f}', fontsize=30)
+
+    plt.savefig(outfolder+f'/samples_{data_name}_label_{str(label_to_filter)}_{flag}.png')
+
