@@ -13,7 +13,7 @@ from image_alignment import plot_aligned_images
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train and evaluate the model.")
-    parser.add_argument('--num_train_epochs', type=int, default=14, help='Number of training epochs.')
+    parser.add_argument('--num_train_epochs', type=int, default=3, help='Number of training epochs.')
     parser.add_argument('--batch_size', type=int, default=20, help='Batch size for training and evaluation.')
     parser.add_argument('--in_chans', type=int, default=3, help='Number of input channels.')
     parser.add_argument('--init_weights_name', type=str, default='imagenet_channelvit_small_p16_with_hcs_supervised', help='Name of the initial weights file.')
@@ -68,10 +68,10 @@ if __name__ == '__main__':
     
     #################################################### ONLY TRAINING MODE  #########################################################
     # Model with originally pretrained weights
-    # model = load_model(args, current_dir+'/Data/', device, args.init_weights_name)
-    # trainer = init_trainer(args, model, val_dataset, current_dir+output_folder)
-    # trainer = train_save_model(trainer, train_dataset, val_dataset, current_dir+output_folder)
-    # ploting_training_results(trainer, current_dir+output_folder)
+    model = load_model(args, current_dir+'/Data/', device, args.init_weights_name)
+    trainer = init_trainer(args, model, val_dataset, current_dir+output_folder)
+    trainer = train_save_model(trainer, train_dataset, val_dataset, current_dir+output_folder)
+    ploting_training_results(trainer, current_dir+output_folder)
 
     ########################################### ONLY PREDICT ###########################################
     ########## Duramat ##########

@@ -130,9 +130,9 @@ def train_save_model(trainer, train_dataset, val_dataset, outfolder):
 def load_model(args, folder, device, weights_path):
     model = hcs_channelvit_small(patch_size= args.patch_size, in_chans=args.in_chans)
     model.load_state_dict(torch.load(folder+weights_path+'.pth', map_location=device))
-    # num_classes = 4  # Replace with the actual number of classes in your dataset
-    # model.head = nn.Linear(model.norm.normalized_shape[0], num_classes)
-    # model.to(device)
+    num_classes = 4  # Replace with the actual number of classes in your dataset
+    model.head = nn.Linear(model.norm.normalized_shape[0], num_classes)
+    model.to(device)
     return model
 
   # Load the model
