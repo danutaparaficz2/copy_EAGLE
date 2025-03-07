@@ -5,6 +5,9 @@ import numpy as np
 import sys
 import os
 import importlib
+def stack_images(images_list):
+    stacked_images = torch.cat([torch.tensor(image) for image in images_list], dim=0)
+    return stacked_images
 
 class Load_Data:
     def __init__(self, path):
@@ -46,12 +49,14 @@ class Load_Data_Handler:
         for i, count in enumerate(label_counts):
             print(f"Label {i}: {count} ({label_types[i]})")
 
-        self.images_el = [np.array(Image.open(PATH+'/segments/'+path).convert('L')) for path in elpaths]
-        self.images_uv = [np.array(Image.open(PATH+'/segments/'+path).convert('L')) for path in uvpaths]
-        self.images_vis = [np.array(Image.open(PATH+'/segments/'+path).convert('L')) for path in vispaths]
+        self.images_el = [np.array(Image.open(PATH+'/segments/'+path)) for path in elpaths]
+        self.images_uv = [np.array(Image.open(PATH+'/segments/'+path)) for path in uvpaths]
+        self.images_vis = [np.array(Image.open(PATH+'/segments/'+path)) for path in vispaths]
         
         # Combine the 3 lists of grayscale images into one list of RGB images
-        self.images = [np.stack((el, uv, vis), axis=-1) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
+        # self.images = [np.stack((el, uv, vis), axis=-1) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
+        # self.images = [np.concatenate((el, uv, vis), axis=-1) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
+        self.images = [np.stack((el, uv, vis)) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
         self.labels_as_integers = [np.argmax(label) for label in labels]
         self.data = list(zip(self.images, self.labels_as_integers))
 
@@ -66,7 +71,7 @@ class Load_Data_Handler:
             else:
                 label_counts[label] = 1
         return label_counts
-    
+
 class PVDataset(torch.utils.data.Dataset):
     def __init__(self, df, channels, transform=None, scale=1):
         self.df = df
@@ -76,9 +81,14 @@ class PVDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         row = self.df[idx]
-        img_hwc = Image.fromarray(row[0])
-        # Apply data augmentation
-        img_chw = self.transform(img_hwc)
+        if row[0].ndim > 3:
+            img_chw = [self.transform(Image.fromarray(channel)) for channel in row[0]]
+            img_chw = stack_images(img_chw)
+            # img_chw = [self.transform(img) if self.transform else img for img in img_chw_list]
+        else:
+            img_chw = Image.fromarray(row[0])
+            # Apply data augmentation
+            img_chw = self.transform(img_chw)
 
         # Select the specified channels
         if isinstance(img_chw, list):

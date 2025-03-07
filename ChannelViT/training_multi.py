@@ -80,17 +80,17 @@ def get_label_statistics(labels_as_integers):
         else:
             label_counts[label] = 1
     return label_counts
-def data_just_transform(data):
+def data_just_transform(data, channels=[0, 1, 2]):
 
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
         transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
     ])
-    dataset_all = PVDataset(data, channels=[0, 1, 2], transform=transform, scale=1)
+    dataset_all = PVDataset(data, channels=channels, transform=transform, scale=1)
     return  dataset_all
 
-def data_split_and_transform(data):
+def data_split_and_transform(data, channels=[0, 1, 2]):
     # Split data into training and validation sets
     train_data, val_data = train_test_split(data, test_size=0.3, random_state=42)
     labels_as_integers = [item[1] for item in train_data]
@@ -103,8 +103,8 @@ def data_split_and_transform(data):
         transforms.ToTensor(),
         transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
     ])
-    train_dataset = PVDataset(train_data, channels=[0, 1, 2], transform=transform, scale=1)
-    val_dataset = PVDataset(val_data, channels=[0, 1, 2], transform=transform, scale=1)
+    train_dataset = PVDataset(train_data, channels=channels, transform=transform, scale=1)
+    val_dataset = PVDataset(val_data, channels=channels, transform=transform, scale=1)
     return train_dataset, val_dataset, transform
 
 def train_save_model(trainer, train_dataset, val_dataset, outfolder):
@@ -116,7 +116,7 @@ def train_save_model(trainer, train_dataset, val_dataset, outfolder):
     predictions = trainer.predict(val_dataset) 
     print(predictions)
     print(predictions.metrics)
-    print('END Duramat direct')
+    print('END training')
     # # Save the trained model
     trainer.save_model(outfolder)  # This saves the model, tokenizer, and training arguments
     # Save the state of the trainer

@@ -12,6 +12,22 @@ import json
 from PIL import Image, ImageEnhance, ImageOps
 import math
 
+
+def convert_array_to_labels(array):
+    labels = []
+    for idx, value in enumerate(array):
+        if value == 1:
+            labels.append(idx)
+    return labels
+
+def convert_list_of_arrays_to_labels(list_of_arrays):
+    all_labels = []
+    for array in list_of_arrays:
+        labels = convert_array_to_labels(array)
+        all_labels.append(labels)
+    return all_labels
+
+
 def compute_metrics(p: EvalPrediction):
     preds = p.predictions.argmax(axis=-1)
     labels = p.label_ids
@@ -69,8 +85,7 @@ def convert_labels_to_one_hot(data):
         converted_data.append((image, label_one))
     return converted_data
 
-def plot_samples_from_all_labels(ds, predlabels, data_name='Unknown', outfolder='./Data'):
-    unique_labels = np.unique(predlabels)
+def plot_samples_from_all_labels(ds, predlabels, unique_labels, data_name='Unknown', outfolder='./Data'):
     def select_images_by_label(ds, label):
         selected_data = []
         selected_predlabels = []
@@ -88,9 +103,9 @@ def plot_samples_from_all_labels(ds, predlabels, data_name='Unknown', outfolder=
 
 
 def calculate_class_accuracy_one_hot(true_labels, pred_logits, class_label, threshold=0.5):
-    # Convert logits to binary predictions using the threshold
     pred_labels = (pred_logits > threshold).astype(int)
-    
+
+
     # Get the indices of the samples belonging to the specific class
     class_indices = np.where(np.array(true_labels)[:, class_label] == 1)[0]
     
@@ -286,17 +301,25 @@ def is_prime(n):
 def find_optimal_grid(n):
     """Return the optimal grid dimensions for plotting n images."""
     for i in range(int(math.sqrt(n)), 0, -1):
-        if n % i == 0:
+        if n % i == 0 and i>1:
             return i, n // i
-    return n, 1
+        elif n % i == 0 and i==1:
+            return (n-1)//2, 2
+
+
 
 
 def plot_samples_from_specific_label(ds, selected_predlabels, label_to_filter, data_name='Unknown', outfolder='./Data'):
    
     label_name = label_names()[label_to_filter]
-    if len(ds) < 36:
+    if len(ds) < 36 and len(ds) > 6:
         idx = 0
         factors = find_optimal_grid(len(ds))
+        grid1 = factors[0]
+        grid2 = factors[1]
+    elif len(ds) <= 6:
+        idx = 0
+        factors = (1, len(ds))
         grid1 = factors[0]
         grid2 = factors[1]
     else:
@@ -304,17 +327,27 @@ def plot_samples_from_specific_label(ds, selected_predlabels, label_to_filter, d
         grid1 = 6
         grid2 = 6
     fig, ax = plt.subplots(grid1, grid2, sharex=True, sharey=True, figsize=(20,20))
-    for i in range(grid1):
+    if grid1 ==1 :
         for j in range(grid2):
-
             s = ds[int(idx)]
-            image = np.transpose(s['images'], (1, 2, 0))
+            image = np.transpose(s['images'][:3,:,:], (1, 2, 0))
             image = normalize_image(image)  # Normalize the image
-            ax[i,j].imshow(image)
-            ax[i,j].set_title(f"Pred: {selected_predlabels[idx]}", fontsize=19)
-            ax[i,j].axis('off')
+            ax[j].imshow(image)
+            ax[j].set_title(f"Pred: {selected_predlabels[idx]}", fontsize=19)
+            ax[j].axis('off')
             idx += 1
-    plt.suptitle('Class:'+ label_name + ', from '+data_name, fontsize=29)
+    else:
+        for i in range(grid1):
+            for j in range(grid2):
+
+                s = ds[int(idx)]
+                image = np.transpose(s['images'][:3,:,:], (1, 2, 0))
+                image = normalize_image(image)  # Normalize the image
+                ax[i,j].imshow(image)
+                ax[i,j].set_title(f"Pred: {selected_predlabels[idx]}", fontsize=19)
+                ax[i,j].axis('off')
+                idx += 1
+    plt.suptitle('Class:'+ label_name + ' ['+str(label_to_filter) + '], from '+data_name, fontsize=29)
     plt.savefig(outfolder+f'/samples_{data_name}_label_{label_name}.png')
 
 def find_last_checkpoint(output_dir):

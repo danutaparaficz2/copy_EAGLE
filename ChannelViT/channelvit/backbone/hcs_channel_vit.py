@@ -293,6 +293,7 @@ def hcs_channelvit_small(patch_size=16, **kwargs):
         depth=12,
         num_heads=6,
         mlp_ratio=4,
+        # num_classes = 0,
         qkv_bias=True,
         norm_layer=partial(nn.LayerNorm, eps=1e-6),
         **kwargs,
