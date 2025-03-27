@@ -13,6 +13,36 @@ from PIL import Image, ImageEnhance, ImageOps
 import math
 
 
+def logits_to_classes(logits, initial_threshold=0.5):
+    """
+    Convert logits to class predictions for multi-label classification with an adaptive threshold.
+
+    Args:
+        logits (torch.Tensor or np.ndarray): The logits output by the model.
+        initial_threshold (float): The initial threshold to apply to the probabilities to determine class membership.
+
+    Returns:
+        np.ndarray: An array of predicted class indices.
+    """
+    # Apply sigmoid to convert logits to probabilities
+    probabilities = torch.sigmoid(torch.tensor(logits)).numpy()
+    
+    # Initialize the predicted classes array
+    predicted_classes = np.zeros_like(probabilities, dtype=int)
+    
+    for i, prob in enumerate(probabilities):
+        # Apply the initial threshold
+        pred = (prob > initial_threshold).astype(int)
+        
+        # If no class is selected, adjust the threshold to select at least one class
+        if np.sum(pred) == 0:
+            max_prob_index = np.argmax(prob)
+            pred[max_prob_index] = 1
+        
+        predicted_classes[i] = pred
+    
+    return predicted_classes
+
 def convert_array_to_labels(array):
     labels = []
     for idx, value in enumerate(array):
@@ -86,7 +116,7 @@ def convert_labels_to_one_hot(data):
     return converted_data
 
 def plot_samples_from_all_labels(ds, predlabels, unique_labels, data_name='Unknown', outfolder='./Data'):
-    def select_images_by_label(ds, label):
+    def select_images_by_label(ds, predlabels, label):
         selected_data = []
         selected_predlabels = []
         for idx, s in enumerate(ds):
@@ -96,10 +126,10 @@ def plot_samples_from_all_labels(ds, predlabels, unique_labels, data_name='Unkno
             
         return selected_data, selected_predlabels
 
-
     for label in unique_labels:
-        selected_images, selected_predlabels = select_images_by_label(ds, label)
+        selected_images, selected_predlabels = select_images_by_label(ds, predlabels, label)
         plot_samples_from_specific_label(selected_images, selected_predlabels, label, data_name, outfolder)
+
 
 
 def calculate_class_accuracy_one_hot(true_labels, pred_logits, class_label, threshold=0.5):
@@ -282,6 +312,40 @@ def count_data_per_class(data):
     print(label_counts)
     print(label_namessss)
     return label_counts
+
+
+def combine_datasets_in_batches(train_data, train_data_web, batch_size=5):
+    combined_data = []
+    web_index = 0
+    web_len = len(train_data_web) - (len(train_data_web) % batch_size)  # Adjust web_len to discard residual
+
+    for i in range(0, len(train_data), batch_size * 5):
+        # Add a batch from the larger dataset
+        combined_data.extend(train_data[i:i + batch_size * 5])
+
+        # Add a batch from the smaller dataset
+        if web_index < web_len:
+            combined_data.extend(train_data_web[web_index:web_index + batch_size])
+            web_index += batch_size
+
+    return combined_data
+
+def count_data_per_class_in_labels(labelss):
+    label_counts = {label: 0 for label in label_names().keys()}
+    label_namessss = {label: 0 for label in label_names().values()}
+
+    class_names = label_names()
+
+    for labels in labelss:
+        for label in labels:
+            label_counts[label] += 1
+            label_namessss[class_names[label]] += 1 
+    # Drop labels with 0 count
+    label_counts = {label: count for label, count in label_counts.items() if count > 0}
+    label_namessss = {label: count for label, count in label_namessss.items() if count > 0}
+    print(label_counts)
+    print(label_namessss)
+    return label_counts
         
     # Print the counts and their label names
     for label, count in label_counts.items():
@@ -309,8 +373,9 @@ def find_optimal_grid(n):
 
 
 
-def plot_samples_from_specific_label(ds, selected_predlabels, label_to_filter, data_name='Unknown', outfolder='./Data'):
-   
+def plot_samples_from_specific_label(ds, selected_predlabels, label_to_filter, data_name='Unknown', 
+                                     outfolder='./Data'):
+    
     label_name = label_names()[label_to_filter]
     if len(ds) < 36 and len(ds) > 6:
         idx = 0
@@ -326,29 +391,40 @@ def plot_samples_from_specific_label(ds, selected_predlabels, label_to_filter, d
         idx = np.random.choice(len(ds)-36, 1, replace=False)[0]
         grid1 = 6
         grid2 = 6
-    fig, ax = plt.subplots(grid1, grid2, sharex=True, sharey=True, figsize=(20,20))
-    if grid1 ==1 :
-        for j in range(grid2):
-            s = ds[int(idx)]
-            image = np.transpose(s['images'][:3,:,:], (1, 2, 0))
-            image = normalize_image(image)  # Normalize the image
-            ax[j].imshow(image)
-            ax[j].set_title(f"Pred: {selected_predlabels[idx]}", fontsize=19)
-            ax[j].axis('off')
-            idx += 1
-    else:
-        for i in range(grid1):
+    idx_original = idx
+    channels_dict = {0: 'EL', 1: 'UV', 2: 'VIS'}
+    channels = range(ds[0]['images'].shape[0])
+    for channel in channels:
+        idx = idx_original
+        fig, ax = plt.subplots(grid1, grid2, sharex=True, sharey=True, figsize=(20,20))
+        if grid1 == 1 :
             for j in range(grid2):
-
                 s = ds[int(idx)]
                 image = np.transpose(s['images'][:3,:,:], (1, 2, 0))
                 image = normalize_image(image)  # Normalize the image
-                ax[i,j].imshow(image)
-                ax[i,j].set_title(f"Pred: {selected_predlabels[idx]}", fontsize=19)
-                ax[i,j].axis('off')
+                if image.shape[2]==3:
+                    image = image[:,:,channel]
+                ax[j].imshow(image, cmap='gray')
+                ax[j].set_title(f"Pred: {selected_predlabels[idx]}", fontsize=19)
+                ax[j].axis('off')
                 idx += 1
-    plt.suptitle('Class:'+ label_name + ' ['+str(label_to_filter) + '], from '+data_name, fontsize=29)
-    plt.savefig(outfolder+f'/samples_{data_name}_label_{label_name}.png')
+        else:
+            for i in range(grid1):
+                for j in range(grid2):
+                    print(idx, channel, len(ds))
+                    s = ds[int(idx)]
+                    image = np.transpose(s['images'][:3,:,:], (1, 2, 0))
+                    image = normalize_image(image)  # Normalize the image
+                    if image.shape[2]==3:
+                        image = image[:,:,channel]
+                    #image = normalize_image(image)  # Normalize the image
+                    ax[i,j].imshow(image, cmap='gray')
+                    ax[i,j].set_title(f"Pred: {selected_predlabels[idx]}", fontsize=19)
+                    ax[i,j].axis('off')
+                    idx += 1
+        channel_name = channels_dict[channel]
+        plt.suptitle('Class:'+ label_name + ' ['+str(label_to_filter) + '], from '+data_name + ' in '+channel_name, fontsize=29)
+        plt.savefig(outfolder+f'/samples_{data_name}_label_{label_name}_{channel_name}.png')
 
 def find_last_checkpoint(output_dir):
     # List all checkpoint directories

@@ -40,8 +40,10 @@ class CustomTrainer(Trainer):
     
 # we need to collate the data to be able to use multiple inputs images and labels and channels
 def custom_collate_fn(examples):
-    images = torch.stack([example['images'] for example in examples])
-    rest = {k: default_collate([example[k] for example in examples]) for k in examples[0] if k != 'images'}
+ #   images = {k: default_collate([example[k] for example in examples]) for k in examples[0] if k == 'images'}
+
+    images = torch.stack([example['images'].float() for example in examples])
+    rest = {k: default_collate([torch.tensor(example[k]).int() for example in examples]) for k in examples[0] if k != 'images'}
     return {'images': images, **rest}
     
 
@@ -80,12 +82,12 @@ def get_label_statistics(labels_as_integers):
         else:
             label_counts[label] = 1
     return label_counts
-def data_just_transform(data, channels=[0, 1, 2]):
+def data_just_transform(data, channels=[0]):
 
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
-        transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
+        transforms.Normalize(mean=(0.5), std=(0.5)),
     ])
     dataset_all = PVDataset(data, channels=channels, transform=transform, scale=1)
     return  dataset_all

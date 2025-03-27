@@ -7,3 +7,7 @@ Augmented/
 ChannelViT/__pycache__/
 requirements.txt
 *.log
+*.jpg
+*.png
+*.jpeg
+*.log

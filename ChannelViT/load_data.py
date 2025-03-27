@@ -5,6 +5,19 @@ import numpy as np
 import sys
 import os
 import importlib
+from torchvision import transforms
+
+
+def save_image_from_array(image_array, file_path):
+    # Ensure the array is in the correct format (uint8)
+    if image_array.dtype != np.uint8:
+        image_array = image_array.astype(np.uint8)
+    
+    # Create an image from the array
+    image = Image.fromarray(image_array)
+    
+    # Save the image
+    image.save(file_path)
 def stack_images(images_list):
     stacked_images = torch.cat([torch.tensor(image) for image in images_list], dim=0)
     return stacked_images
@@ -16,7 +29,12 @@ class Load_Data:
         self.df = self.df[self.df.labels >= 0]
         self.labels = self.df.labels.unique()
         self.labels_as_integers = [int(label) for label in self.df['labels'].values]
-        self.images = [image.astype(np.uint8) for image in list(self.df.images.values)]
+        self.images = [image.astype(np.float32) for image in list(self.df.images.values)]
+        for image in self.images:
+            if np.any(image > 255) or np.any(image < 0):
+                raise ValueError("Image values should be in the range [0, 255]")
+        self.images = [image.astype(np.uint8) for image in self.images]
+        self.images = [np.array(Image.fromarray(image).convert('L')) for image in self.images]
         self.data = list(zip(self.images, self.labels_as_integers))
 
     def get_data(self):
@@ -46,19 +64,17 @@ class Load_Data_Handler:
         elpaths, uvpaths, vispaths, labels = eagle_jsonhandler.getCellsImagePathsAndLabels(classified_cells)
         label_types = ["good", "crack", "cross", "dark", "corrosion"]
         label_counts = np.sum(labels, axis=0)
-        for i, count in enumerate(label_counts):
-            print(f"Label {i}: {count} ({label_types[i]})")
 
-        self.images_el = [np.array(Image.open(PATH+'/segments/'+path)) for path in elpaths]
-        self.images_uv = [np.array(Image.open(PATH+'/segments/'+path)) for path in uvpaths]
-        self.images_vis = [np.array(Image.open(PATH+'/segments/'+path)) for path in vispaths]
+        self.images_el = [np.array(Image.open(PATH+'/segments/'+path).convert('L')).astype(np.uint8) for path in elpaths]
+        self.images_uv = [np.array(Image.open(PATH+'/segments/'+path).convert('L')).astype(np.uint8) for path in uvpaths]
+        self.images_vis = [np.array(Image.open(PATH+'/segments/'+path).convert('L')).astype(np.uint8) for path in vispaths]
         
         # Combine the 3 lists of grayscale images into one list of RGB images
         # self.images = [np.stack((el, uv, vis), axis=-1) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
         # self.images = [np.concatenate((el, uv, vis), axis=-1) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
-        self.images = [np.stack((el, uv, vis)) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
-        self.labels_as_integers = [np.argmax(label) for label in labels]
-        self.data = list(zip(self.images, self.labels_as_integers))
+        self.images = [np.stack((el, uv, vis), axis=-1)for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
+        self.labels_as_integers = [np.where(label == 1)[0].tolist() for label in labels]
+        self.data = list(zip(self.images, labels))
 
     def get_data(self):
         return self.data
@@ -81,14 +97,11 @@ class PVDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         row = self.df[idx]
-        if row[0].ndim > 3:
-            img_chw = [self.transform(Image.fromarray(channel)) for channel in row[0]]
-            img_chw = stack_images(img_chw)
-            # img_chw = [self.transform(img) if self.transform else img for img in img_chw_list]
-        else:
-            img_chw = Image.fromarray(row[0])
-            # Apply data augmentation
-            img_chw = self.transform(img_chw)
+
+        img_chw = Image.fromarray(row[0])
+
+        # Apply data augmentation
+        img_chw = self.transform(img_chw)
 
         # Select the specified channels
         if isinstance(img_chw, list):
@@ -114,3 +127,28 @@ class PVDataset(torch.utils.data.Dataset):
         """Filter out bad examples (None) within the batch."""
         batch = list(filter(lambda example: example is not None, batch))
         return default_collate(batch)
+
+
+def load_data_from_csv(csv_path):
+    """
+    Load data from a CSV file. Assumes the CSV contains 'image_path' and 'label' columns.
+
+    Args:
+        csv_path (str): Path to the CSV file.
+
+    Returns:
+        list: A list of tuples where each tuple contains an image array and its corresponding label.
+    """
+    data = []
+    df = pd.read_csv(csv_path)
+
+    for _, row in df.iterrows():
+        image_path = row['image_path']
+        label = row['label']
+
+        # Load the image and convert it to grayscale
+        image = np.array(Image.open(image_path).convert('L')).astype(np.uint8)
+
+        data.append((image, label))
+
+    return data
