@@ -124,7 +124,10 @@ class CustomTrainer:
 
         all_labels = np.concatenate(all_labels, axis=0)
         all_outputs = np.concatenate(all_outputs, axis=0)
-        metrics = compute_metrics_sigmoid({"predictions": all_outputs,"label_ids": all_labels})
+        from transformers import EvalPrediction
+        p = EvalPrediction(predictions=all_outputs, label_ids=all_labels)
+
+        metrics = compute_metrics_sigmoid(p)
         return metrics
     
     def predict(self, inputs):

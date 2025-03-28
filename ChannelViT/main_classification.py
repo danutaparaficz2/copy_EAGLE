@@ -20,7 +20,7 @@ import pickle
 def parse_args():
 
     parser = argparse.ArgumentParser(description="Train and evaluate the model.")
-    parser.add_argument('--num_train_epochs', type=int, default=5, help='Number of training epochs.')
+    parser.add_argument('--num_train_epochs', type=int, default=25, help='Number of training epochs.')
     parser.add_argument('--batch_size', type=int, default=5, help='Batch size for training and evaluation.')
     parser.add_argument('--in_chans', type=int, default=3, help='Number of input channels.')
     parser.add_argument('--learning_rate', type=float, default=1e-5, help='Learning rate for training.')     
