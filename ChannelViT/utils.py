@@ -97,7 +97,7 @@ def convert_to_one_hot(labels, num_classes=4):
     return one_hot_labels.float()
 
 
-def convert_labels_to_one_hot(data):
+def convert_labels_to_one_hot(data, num_classes=4):
     converted_data = []
     for item in data:
         image, label = item
@@ -106,11 +106,11 @@ def convert_labels_to_one_hot(data):
             label_index = []
             for label in label_name.split('&'):
                 label_index.append(list(label_names().values()).index(label))
-            label_one = convert_to_one_hot(label_index)
+            label_one = convert_to_one_hot(label_index, num_classes=num_classes)
             label_one = label_one.sum(axis=0)
         else:
             label_index = [label]
-            label_one = convert_to_one_hot(label_index)
+            label_one = convert_to_one_hot(label_index, num_classes=num_classes)
             label_one = label_one.sum(axis=0)
         converted_data.append((image, label_one))
     return converted_data
@@ -122,7 +122,10 @@ def plot_samples_from_all_labels(ds, predlabels, unique_labels, data_name='Unkno
         for idx, s in enumerate(ds):
             if s['labels'][label] == 1:
                  selected_data.append(s)
-                 selected_predlabels.append(predlabels[idx])
+                 if predlabels is not None:
+                    selected_predlabels.append(predlabels[idx])
+                 else:
+                    selected_predlabels = None
             
         return selected_data, selected_predlabels
 
@@ -405,7 +408,8 @@ def plot_samples_from_specific_label(ds, selected_predlabels, label_to_filter, d
                 if image.shape[2]==3:
                     image = image[:,:,channel]
                 ax[j].imshow(image, cmap='gray')
-                ax[j].set_title(f"Pred: {selected_predlabels[idx]}", fontsize=19)
+                if selected_predlabels is not None:
+                    ax[j].set_title(f"Pred: {selected_predlabels[idx]}", fontsize=19)
                 ax[j].axis('off')
                 idx += 1
         else:
@@ -419,7 +423,8 @@ def plot_samples_from_specific_label(ds, selected_predlabels, label_to_filter, d
                         image = image[:,:,channel]
                     #image = normalize_image(image)  # Normalize the image
                     ax[i,j].imshow(image, cmap='gray')
-                    ax[i,j].set_title(f"Pred: {selected_predlabels[idx]}", fontsize=19)
+                    if selected_predlabels is not None:
+                        ax[i,j].set_title(f"Pred: {selected_predlabels[idx]}", fontsize=19)
                     ax[i,j].axis('off')
                     idx += 1
         channel_name = channels_dict[channel]

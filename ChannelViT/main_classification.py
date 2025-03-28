@@ -14,6 +14,7 @@ from image_alignment import plot_aligned_images
 from torch.utils.data import ConcatDataset, DataLoader
 from training_var import CustomTrainer, train_save_model, data_just_transform
 from sklearn.model_selection import train_test_split
+import pickle
 
 
 def parse_args():
@@ -54,22 +55,36 @@ if __name__ == '__main__':
     ######################################### Load the data ##################################################
     ########### DURAMAT ##########
     path_Duramat = "/Users/eagle/FFHS/eagle-bfe - data/Duramat_no_pool_labels.pkl"
+    # Loop over a directory to read pickle files
+
+    directory_path = os.path.dirname(current_dir)+"/eagle-labelling/features_pickle/"
+
+    # for filename in os.listdir(directory_path):
+    #     if filename.endswith(".pkl"):
+    #         file_path = os.path.join(directory_path, filename)
+    #         with open(file_path, 'rb') as file:
+    #             data = pickle.load(file)
+    #             print(data.labels)
+    path_Duramat = "/Users/eagle/FFHS/eagle-bfe - data/Duramat_no_pool_labels.pkl"
     data_loader =  Load_Data(path_Duramat)
     data_Duramat = data_loader.get_data()
     label_counts_duramat = count_data_per_class(data_Duramat)
-    data_Duramat = convert_labels_to_one_hot(data_Duramat)
+    data_Duramat = convert_labels_to_one_hot(data_Duramat, len(label_counts_duramat))
     dataset_duramat = data_just_transform(data_Duramat, channels=[0])
     data_loader.get_label_statistics()
+    plot_samples_from_all_labels(dataset_duramat,None, list(label_counts_duramat.keys()), data_name='dur', outfolder=current_dir+output_folder)
 
     ########### INFINITY ##########
     path_Infinity = os.path.dirname(current_dir)+"/eagle-labelling/features_pickle/Infinity_all_no_pool_labels.pkl"
     data_loader =  Load_Data(path_Infinity)
     data_Infinity = data_loader.get_data()
-    data_Infinity = [item for item in data_Infinity if item[1] <= 3]    # Remove data with labels above 3
+    data_loader.get_label_statistics()
+    data_Infinity = [item for item in data_Infinity if item[1] <= 6]    # Remove data with labels above 3
     label_counts_infinity = count_data_per_class(data_Infinity)
-    data_Infinity = convert_labels_to_one_hot(data_Infinity)
+    data_Infinity = convert_labels_to_one_hot(data_Infinity, len(label_counts_infinity))
     dataset_Infinity = data_just_transform(data_Infinity, channels=[0])
     data_loader.get_label_statistics()
+    plot_samples_from_all_labels(dataset_Infinity,None, list(label_counts_infinity.keys()), data_name='inf', outfolder=current_dir+output_folder)
 
     ########### WEBSITE ##########
 
@@ -79,6 +94,7 @@ if __name__ == '__main__':
     data_Website = [(item[0], item[1][0:4]) for item in data_Website]    # Remove data with labels above 3
     label_counts_Website = count_data_per_class_in_labels(data_loader_2.labels_as_integers)
     dataset_Website = data_just_transform(data_Website, channels=[0, 1, 2])
+    plot_samples_from_all_labels(dataset_Website,None, list(label_counts_duramat.keys()), data_name='web', outfolder=current_dir+output_folder)
 
     ########### COMBINE DATASETS ##########
     label_counts = {key: label_counts_duramat.get(key, 0) + label_counts_infinity.get(key, 0) + 

@@ -6,7 +6,7 @@ import sys
 import os
 import importlib
 from torchvision import transforms
-
+from utils import label_names
 
 def save_image_from_array(image_array, file_path):
     # Ensure the array is in the correct format (uint8)
@@ -48,7 +48,11 @@ class Load_Data:
                 label_counts[label] += 1
             else:
                 label_counts[label] = 1
+
+        label_counts = dict(sorted(label_counts.items()))
         print(label_counts)
+        label_counts_named = {(label_names())[int_label]: count for int_label, count in label_counts.items()}
+        print(label_counts_named)
         return label_counts
     
     
