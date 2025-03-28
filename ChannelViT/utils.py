@@ -429,6 +429,8 @@ def plot_samples_from_specific_label(ds, selected_predlabels, label_to_filter, d
                     idx += 1
         channel_name = channels_dict[channel]
         plt.suptitle('Class:'+ label_name + ' ['+str(label_to_filter) + '], from '+data_name + ' in '+channel_name, fontsize=29)
+        if os.path.exists(outfolder) == False:
+            os.makedirs(outfolder)
         plt.savefig(outfolder+f'/samples_{data_name}_label_{label_name}_{channel_name}.png')
 
 def find_last_checkpoint(output_dir):

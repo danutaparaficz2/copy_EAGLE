@@ -20,7 +20,7 @@ import pickle
 def parse_args():
 
     parser = argparse.ArgumentParser(description="Train and evaluate the model.")
-    parser.add_argument('--num_train_epochs', type=int, default=30, help='Number of training epochs.')
+    parser.add_argument('--num_train_epochs', type=int, default=5, help='Number of training epochs.')
     parser.add_argument('--batch_size', type=int, default=5, help='Batch size for training and evaluation.')
     parser.add_argument('--in_chans', type=int, default=3, help='Number of input channels.')
     parser.add_argument('--learning_rate', type=float, default=1e-5, help='Learning rate for training.')     
@@ -108,10 +108,10 @@ if __name__ == '__main__':
 
     #################################################### ONLY TRAINING MODE  #########################################################
     # Model with originally pretrained weights
-    # model = load_model(args, current_dir+'/Data/', device, args.init_weights_name)
-    # trainer = CustomTrainer(model, args, train_data, train_data_web, val_data, val_data_web, device,  current_dir+output_folder+'/all/')
-    # trainer.train()
-    # trainer = train_save_model(trainer, current_dir+output_folder+'/all/')
+    model = load_model(args, current_dir+'/Data/', device, args.init_weights_name)
+    trainer = CustomTrainer(model, args, train_data, train_data_web, val_data, val_data_web, device,  current_dir+output_folder+'/all/')
+    trainer.train()
+    trainer = train_save_model(trainer, current_dir+output_folder+'/all/')
 
     ###################################### VALIDATION ########################################################
     # ########## Duramat + Infinity ##########
