@@ -155,9 +155,18 @@ if __name__ == '__main__':
 
     predictions = trainer.predict(dataset_Website)
     # Save predictions to a parquet file
-
+    pred_labels = logits_to_classes(predictions.cpu().numpy())
+    predlabels = convert_list_of_arrays_to_labels(pred_labels)
+    
     output_predictions_path = os.path.join(current_dir+output_folder, 'predictions_tiso.parquet')
-    predictions_df = pd.DataFrame(predictions.cpu().numpy(), index=im_names)
+    predictions_df = pd.DataFrame(pred_labels, index=im_names)
+    a = predictions_df.index.str.extract(r'(Cell\d+)')
+    a = pd.DataFrame(a.values, index=predictions_df.index)
+    b = pd.concat([a, predictions_df],axis=1)
+    b.index = b.index.str.replace(r'_Cell\d+', '', regex=True)
+    b.index = b.index.str.replace(r'_EL', '', regex=True)
+    b.index = b.index.astype(int)
+    b = b.pivot(columns='cell')
     predictions_df.to_parquet(output_predictions_path, index=True)
     print(f"Predictions saved to {output_predictions_path}")
     exit()
