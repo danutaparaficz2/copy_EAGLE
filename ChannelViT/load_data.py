@@ -1,4 +1,5 @@
 import torch
+import re
 import pandas as pd
 from PIL import Image
 import numpy as np
@@ -92,12 +93,44 @@ class Load_Data_Handler:
                 label_counts[label] = 1
         return label_counts
 
+class Load_Data_Handler_notlabeled:
+    def __init__(self, PATH, subfolder):
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        panelfolder = PATH+'/segments/'+subfolder
+        elpaths = [file for file in os.listdir(panelfolder) if file.split("_")[1].startswith("EL") and file.endswith(".tif")]
+        uvpaths = [file for file in os.listdir(panelfolder) if file.split("_")[1].startswith("UV") and file.endswith(".tif")]
+        vispaths = [file for file in os.listdir(panelfolder) if file.split("_")[1].startswith("VI") and file.endswith(".tif")]
+        label_types = ["good", "crack", "cross", "dark", "corrosion"]
+        
+        sorted_elpaths = sorted(elpaths, key=lambda x: (int(re.search(r'^(\d+)', x).group(1)), int(re.search(r'Cell(\d+)', x).group(1))))
+        sorted_uvpaths = sorted(uvpaths, key=lambda x: (int(re.search(r'^(\d+)', x).group(1)), int(re.search(r'Cell(\d+)', x).group(1))))
+        sorted_vispaths = sorted(vispaths, key=lambda x: (int(re.search(r'^(\d+)', x).group(1)), int(re.search(r'Cell(\d+)', x).group(1))))
+        assert len(sorted_elpaths) == len(sorted_uvpaths) == len(sorted_vispaths), "Mismatch in number of images across channels"   
+
+        self.images_el = [np.array(Image.open(PATH+'/segments/'+subfolder+'/'+path).convert('L')).astype(np.uint8) for path in sorted_elpaths]
+        self.images_uv = [np.array(Image.open(PATH+'/segments/'+subfolder+'/'+path).convert('L')).astype(np.uint8) for path in sorted_uvpaths]
+        self.images_vis = [np.array(Image.open(PATH+'/segments/'+subfolder+'/'+path).convert('L')).astype(np.uint8) for path in sorted_vispaths]
+
+        # Combine the 3 lists of grayscale images into one list of RGB images
+        # self.images = [np.stack((el, uv, vis), axis=-1) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
+        # self.images = [np.concatenate((el, uv, vis), axis=-1) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
+        self.images = [np.stack((el, uv, vis), axis=-1)for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
+        self.data = list(zip(self.images))
+        self.sorted_elpaths=sorted_elpaths
+        
+    def get_data(self):
+        return self.data, self.sorted_elpaths
+    
+
+
 class PVDataset(torch.utils.data.Dataset):
-    def __init__(self, df, channels, transform=None, scale=1):
+    def __init__(self, df, channels, transform=None, scale=1, return_labels=True):
         self.df = df
         self.channels = channels
         self.transform = transform
         self.scale = scale
+        self.return_labels = return_labels
 
     def __getitem__(self, idx):
         row = self.df[idx]
@@ -120,9 +153,12 @@ class PVDataset(torch.utils.data.Dataset):
             else:
                 img_chw *= self.scale
         self.channels = torch.tensor([c for c in self.channels])
-        
-        return {"images":img_chw, "labels": row[1], "channels": self.channels}
 
+        if self.return_labels:
+            return {"images": img_chw, "labels": row[1], "channels": self.channels}
+        else:
+            return {"images": img_chw, "channels": self.channels}
+        
     def __len__(self):
         return len(self.df)
     

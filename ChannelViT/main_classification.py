@@ -5,7 +5,7 @@ import re
 import argparse
 PYTORCH_ENABLE_MPS_FALLBACK=1
 #### Local imports
-from load_data import Load_Data, PVDataset, Load_Data_Handler
+from load_data import Load_Data, PVDataset, Load_Data_Handler, Load_Data_Handler_notlabeled
 from training_multi import  init_trainer, load_model, load_post_trained_model, data_split_and_transform
 from utils import  (plot_samples, ploting_training_results, count_data_per_class, plot_samples_from_all_labels, convert_list_of_arrays_to_labels,
 calculate_class_accuracy_one_hot, find_last_checkpoint, calculate_class_accuracy, convert_labels_to_one_hot, 
@@ -15,6 +15,7 @@ from torch.utils.data import ConcatDataset, DataLoader
 from training_var import CustomTrainer, train_save_model, data_just_transform
 from sklearn.model_selection import train_test_split
 import pickle
+import pandas as pd
 
 
 def parse_args():
@@ -108,10 +109,10 @@ if __name__ == '__main__':
 
     #################################################### ONLY TRAINING MODE  #########################################################
     # Model with originally pretrained weights
-    model = load_model(args, current_dir+'/Data/', device, args.init_weights_name)
-    trainer = CustomTrainer(model, args, train_data, train_data_web, val_data, val_data_web, device,  current_dir+output_folder+'/all/')
-    trainer.train()
-    trainer = train_save_model(trainer, current_dir+output_folder+'/all/')
+    # model = load_model(args, current_dir+'/Data/', device, args.init_weights_name)
+    # trainer = CustomTrainer(model, args, train_data, train_data_web, val_data, val_data_web, device,  current_dir+output_folder+'/all/')
+    # trainer.train()
+    # trainer = train_save_model(trainer, current_dir+output_folder+'/all/')
 
     ###################################### VALIDATION ########################################################
     # ########## Duramat + Infinity ##########
@@ -144,6 +145,21 @@ if __name__ == '__main__':
     print('END Webpage prediction')
     plot_samples_from_all_labels(val_data_web, predlabels, list(label_counts_duramat.keys()), data_name='Webpage', outfolder=current_dir+output_folder)
 
+    # ########################################### TISO ###########################################
+
+
+    path_Website = "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage"
+    data_loader_2  = Load_Data_Handler_notlabeled(path_Website,'TISO-EAGLE-23-P09_images')
+    data_Website, im_names = data_loader_2.get_data()
+    dataset_Website = data_just_transform(data_Website, channels=[0, 1, 2] , return_labels=False)
+
+    predictions = trainer.predict(dataset_Website)
+    # Save predictions to a parquet file
+
+    output_predictions_path = os.path.join(current_dir+output_folder, 'predictions_tiso.parquet')
+    predictions_df = pd.DataFrame(predictions.cpu().numpy(), index=im_names)
+    predictions_df.to_parquet(output_predictions_path, index=True)
+    print(f"Predictions saved to {output_predictions_path}")
     exit()
     # trainer = init_trainer(args, model, val_data_web, current_dir+output_folder+'/all/')
     # trainer = train_save_model(trainer, train_data_web, val_data_web, current_dir+output_folder+'/all/')

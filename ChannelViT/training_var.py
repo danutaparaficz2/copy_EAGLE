@@ -171,7 +171,7 @@ def custom_collate_fn(examples, device):
     rest = {k: default_collate([torch.tensor(example[k]).int().to(device) for example in examples]) for k in examples[0] if k != 'images'}
     return {'images': images, **rest}
 
-def data_just_transform(data, channels=[0]):
+def data_just_transform(data, channels=[0], return_labels=True):
     # Define a custom transform to normalize the images to the range [0, 1]
 
     if len(channels) > 1:
@@ -187,7 +187,7 @@ def data_just_transform(data, channels=[0]):
             transforms.Normalize(mean=[0.5], std=[0.5])  # Normalize the image
 
         ])
-    dataset_all = PVDataset(data, channels=channels, transform=transform, scale=1)
+    dataset_all = PVDataset(data, channels=channels, transform=transform, scale=1, return_labels=return_labels)
     return  dataset_all
 
 def train_save_model(trainer, outfolder):

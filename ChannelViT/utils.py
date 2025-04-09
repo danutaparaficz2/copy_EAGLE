@@ -397,7 +397,8 @@ def plot_samples_from_specific_label(ds, selected_predlabels, label_to_filter, d
     idx_original = idx
     channels_dict = {0: 'EL', 1: 'UV', 2: 'VIS'}
     channels = range(ds[0]['images'].shape[0])
-    print(idx, channel, len(ds))
+    
+    print(idx, channels, len(ds))
     for channel in channels:
         idx = idx_original
         fig, ax = plt.subplots(grid1, grid2, sharex=True, sharey=True, figsize=(20,20))
