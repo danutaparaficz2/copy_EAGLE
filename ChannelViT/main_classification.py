@@ -6,10 +6,10 @@ import argparse
 PYTORCH_ENABLE_MPS_FALLBACK=1
 #### Local imports
 from load_data import Load_Data, PVDataset, Load_Data_Handler, Load_Data_Handler_notlabeled
-from training_multi import  init_trainer, load_model, load_post_trained_model, data_split_and_transform
+from ChannelViT.training_multi_obsolete import  init_trainer, load_model, load_post_trained_model, data_split_and_transform
 from utils import  (plot_samples, ploting_training_results, count_data_per_class, plot_samples_from_all_labels, convert_list_of_arrays_to_labels,
 calculate_class_accuracy_one_hot, find_last_checkpoint, calculate_class_accuracy, convert_labels_to_one_hot, 
-count_data_per_class_in_labels, combine_datasets_in_batches, logits_to_classes)
+count_data_per_class_in_labels, combine_datasets_in_batches, logits_to_classes, save_images_by_label)
 from image_alignment import plot_aligned_images
 from torch.utils.data import ConcatDataset, DataLoader
 from training_var import CustomTrainer, train_save_model, data_just_transform
@@ -97,6 +97,8 @@ if __name__ == '__main__':
     dataset_Website = data_just_transform(data_Website, channels=[0, 1, 2])
     plot_samples_from_all_labels(dataset_Website,None, list(label_counts_duramat.keys()), data_name='web', outfolder=current_dir+output_folder)
 
+    save_images_by_label(data_Website, data_loader_2.labels_as_integers, current_dir+output_folder+'/Webpage_images_new/')
+
     ########### COMBINE DATASETS ##########
     label_counts = {key: label_counts_duramat.get(key, 0) + label_counts_infinity.get(key, 0) + 
                     label_counts_Website.get(key, 0) for key in set(label_counts_duramat) | set(label_counts_infinity)| set(label_counts_Website)}
@@ -109,10 +111,10 @@ if __name__ == '__main__':
 
     #################################################### ONLY TRAINING MODE  #########################################################
     # Model with originally pretrained weights
-    # model = load_model(args, current_dir+'/Data/', device, args.init_weights_name)
-    # trainer = CustomTrainer(model, args, train_data, train_data_web, val_data, val_data_web, device,  current_dir+output_folder+'/all/')
-    # trainer.train()
-    # trainer = train_save_model(trainer, current_dir+output_folder+'/all/')
+    model = load_model(args, current_dir+'/Data/', device, args.init_weights_name)
+    trainer = CustomTrainer(model, args, train_data, train_data_web, val_data, val_data_web, device,  current_dir+output_folder+'/all/')
+    trainer.train()
+    trainer = train_save_model(trainer, current_dir+output_folder+'/all/')
 
     ###################################### VALIDATION ########################################################
     # ########## Duramat + Infinity ##########
@@ -157,7 +159,18 @@ if __name__ == '__main__':
     # Save predictions to a parquet file
     pred_labels = logits_to_classes(predictions.cpu().numpy())
     predlabels = convert_list_of_arrays_to_labels(pred_labels)
-    
+    save_images_by_label(data_Website, predlabels, current_dir+output_folder+'/TISO_images/')
+    label_counts = {}
+    for label in predlabels:
+        if label in label_counts:
+            label_counts[label] += 1
+        else:
+            label_counts[label] = 1
+    label_counts = dict(sorted(label_counts.items()))
+    print(label_counts)
+
+    label_counts_named = {(label_names())[int_label]: count for int_label, count in label_counts.items()}
+    print(label_counts_named)
     output_predictions_path = os.path.join(current_dir+output_folder, 'predictions_tiso.parquet')
     predictions_df = pd.DataFrame(pred_labels, index=im_names)
     a = predictions_df.index.str.extract(r'(Cell\d+)')

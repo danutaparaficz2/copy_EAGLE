@@ -12,6 +12,66 @@ import json
 from PIL import Image, ImageEnhance, ImageOps
 import math
 
+def save_images_by_label(images, labels, output_dir):
+    """
+    Save images into separate folders based on their labels, enhancing contrast for better visibility.
+
+    Args:
+        images (list): List of image arrays (NumPy arrays).
+        labels (list): List of labels corresponding to the images.
+        output_dir (str): Path to the output directory where folders will be created.
+    """
+    # Ensure the output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+
+    for i, (image, label) in enumerate(zip(images, labels)):
+        # Use only the first label if there are multiple labels
+        if isinstance(label, list) or isinstance(label, np.ndarray):
+            if len(label) > 0:
+                label = label[0]
+            else:
+                continue
+            
+        image = image[0]
+        # Create a folder for the label
+        label_folder = os.path.join(output_dir, label_names()[label])
+        os.makedirs(label_folder, exist_ok=True)
+
+        # Enhance contrast and save the image
+        if image.ndim == 3:
+            # Split the RGB image into its channels
+            red_channel = image[:, :, 0]
+            green_channel = image[:, :, 1]
+            blue_channel = image[:, :, 2]
+
+            # Normalize and enhance contrast for each channel
+            red_channel = normalize_image(red_channel) * 255
+            green_channel = (1- normalize_image(green_channel)) * 255 *0.5 # Brighten green channel
+            blue_channel = (1-normalize_image(blue_channel)) * 255  *0.8 # Brighten blue channel
+
+            # Clip values to ensure they remain valid
+            green_channel = np.clip(green_channel, 0, 255)
+            blue_channel = np.clip(blue_channel, 0, 255)
+
+            red_image = Image.fromarray(red_channel.astype(np.uint8))
+            green_image = Image.fromarray(green_channel.astype(np.uint8))
+            blue_image = Image.fromarray(blue_channel.astype(np.uint8))
+
+            # Concatenate the channels horizontally
+            combined_image = Image.new('RGB', (red_image.width * 3, red_image.height))
+            combined_image.paste(red_image, (0, 0))
+            combined_image.paste(green_image, (red_image.width, 0))
+            combined_image.paste(blue_image, (red_image.width * 2, 0))
+
+            # Save the combined image
+            combined_image.save(os.path.join(label_folder, f'image_{i}_rgb_channels.png'))
+        elif image.ndim == 2:
+            # Normalize and enhance contrast for grayscale images
+            image = normalize_image(image) * 255
+            image = Image.fromarray(image.astype(np.uint8))
+            image.save(os.path.join(label_folder, f'image_{i}.png'))
+
+    print(f"Images saved in folders under {output_dir}")
 
 def logits_to_classes(logits, initial_threshold=0.5):
     """
