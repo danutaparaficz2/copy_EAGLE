@@ -6,7 +6,7 @@ import argparse
 PYTORCH_ENABLE_MPS_FALLBACK=1
 #### Local imports
 from load_data import Load_Data, PVDataset, Load_Data_Handler, Load_Data_Handler_notlabeled
-from ChannelViT.training_multi_obsolete import  init_trainer, load_model, load_post_trained_model, data_split_and_transform
+from training_multi_obsolete import  init_trainer, load_model, load_post_trained_model, data_split_and_transform
 from utils import  (plot_samples, ploting_training_results, count_data_per_class, plot_samples_from_all_labels, convert_list_of_arrays_to_labels,
 calculate_class_accuracy_one_hot, find_last_checkpoint, calculate_class_accuracy, convert_labels_to_one_hot, 
 count_data_per_class_in_labels, combine_datasets_in_batches, logits_to_classes, save_images_by_label)
@@ -74,7 +74,7 @@ if __name__ == '__main__':
     dataset_duramat = data_just_transform(data_Duramat, channels=[0])
     data_loader.get_label_statistics()
     plot_samples_from_all_labels(dataset_duramat,None, list(label_counts_duramat.keys()), data_name='dur', outfolder=current_dir+output_folder)
-
+    save_images_by_label(dataset_duramat, label_counts_duramat.keys(), current_dir)
     ########### INFINITY ##########
     path_Infinity = os.path.dirname(current_dir)+"/eagle-labelling/features_pickle/Infinity_all_no_pool_labels.pkl"
     data_loader =  Load_Data(path_Infinity)
