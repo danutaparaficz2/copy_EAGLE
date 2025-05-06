@@ -8,20 +8,24 @@ PYTORCH_ENABLE_MPS_FALLBACK=1
 from load_data import Load_Data, PVDataset, Load_Data_Handler, Load_Data_Handler_notlabeled
 from ChannelViT.training_multi_obsolete import  init_trainer, load_model, load_post_trained_model, data_split_and_transform
 from utils import  (plot_samples, ploting_training_results, count_data_per_class, plot_samples_from_all_labels, convert_list_of_arrays_to_labels,
-calculate_class_accuracy_one_hot, find_last_checkpoint, calculate_class_accuracy, convert_labels_to_one_hot, 
+calculate_class_accuracy_one_hot, find_last_checkpoint, calculate_class_accuracy, convert_labels_to_one_hot, label_names,
 count_data_per_class_in_labels, combine_datasets_in_batches, logits_to_classes, save_images_by_label)
 from image_alignment import plot_aligned_images
 from torch.utils.data import ConcatDataset, DataLoader
-from training_var import CustomTrainer, train_save_model, data_just_transform
+from training_var import CustomTrainer, train_save_model, data_just_transform, load_model, load_post_trained_model
+# from training_multi_obsolete import CustomTrainer, train_save_model, data_just_transform
+
 from sklearn.model_selection import train_test_split
 import pickle
 import pandas as pd
-
+from PIL import Image
+from sklearn.model_selection import cross_val_predict
+from sklearn.base import BaseEstimator
 
 def parse_args():
 
     parser = argparse.ArgumentParser(description="Train and evaluate the model.")
-    parser.add_argument('--num_train_epochs', type=int, default=25, help='Number of training epochs.')
+    parser.add_argument('--num_train_epochs', type=int, default=16, help='Number of training epochs.')
     parser.add_argument('--batch_size', type=int, default=5, help='Batch size for training and evaluation.')
     parser.add_argument('--in_chans', type=int, default=3, help='Number of input channels.')
     parser.add_argument('--learning_rate', type=float, default=1e-5, help='Learning rate for training.')     
@@ -51,8 +55,6 @@ if __name__ == '__main__':
     device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
     output_folder = '/Data/model_with_'+args.init_weights_name+'/epochs_'+str(args.num_train_epochs)+'/'
 
-    # Find the last checkpoint
-
     ######################################### Load the data ##################################################
     ########### DURAMAT ##########
     path_Duramat = "/Users/eagle/FFHS/eagle-bfe - data/Duramat_no_pool_labels.pkl"
@@ -60,52 +62,129 @@ if __name__ == '__main__':
 
     directory_path = os.path.dirname(current_dir)+"/eagle-labelling/features_pickle/"
 
-    # for filename in os.listdir(directory_path):
-    #     if filename.endswith(".pkl"):
-    #         file_path = os.path.join(directory_path, filename)
-    #         with open(file_path, 'rb') as file:
-    #             data = pickle.load(file)
-    #             print(data.labels)
     path_Duramat = "/Users/eagle/FFHS/eagle-bfe - data/Duramat_no_pool_labels.pkl"
     data_loader =  Load_Data(path_Duramat)
     data_Duramat = data_loader.get_data()
     label_counts_duramat = count_data_per_class(data_Duramat)
+    # combine class 2 and 3 (they are the same in Duramat data (see presentation))
+    data_Duramat = [(item[0], item[1] if item[1] != 3 else 2) for item in data_Duramat]
+    # Remove data with labels above 3
+    data_Duramat = [item for item in data_Duramat if item[1] <= 3]
+    data_loader.get_label_statistics()    
+    label_counts_duramat = count_data_per_class(data_Duramat)
     data_Duramat = convert_labels_to_one_hot(data_Duramat, len(label_counts_duramat))
+    
     dataset_duramat = data_just_transform(data_Duramat, channels=[0])
     data_loader.get_label_statistics()
-    plot_samples_from_all_labels(dataset_duramat,None, list(label_counts_duramat.keys()), data_name='dur', outfolder=current_dir+output_folder)
+    # plot_samples_from_all_labels(dataset_duramat,None, list(label_counts_duramat.keys()), data_name='dur', outfolder=current_dir+output_folder)
+    # Separate images and labels into two lists
+    labels = [item[1] for item in data_Duramat]  # Extract the labels (tensors)
+    integer_labels = [torch.where(label == 1)[0][0].item() for label in labels]
+    save_images_by_label(data_Duramat, integer_labels, current_dir+'/Data/Duramat_images_new/')
 
-    ########### INFINITY ##########
+    train_data, val_data = train_test_split(dataset_duramat, test_size=0.3, random_state=42)
+
+
+    # ########### WEBSITE ##########
+
+    path_Website = "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage"
+    data_loader_2 = Load_Data_Handler(path_Website)
+    data_Website = data_loader_2.get_data()
+    data_Website = [(item[0], item[1][0:3]) for item in data_Website]    # Remove data with labels above 3
+
+    label_counts_Website = count_data_per_class_in_labels(data_loader_2.labels_as_integers)
+    dataset_Website = data_just_transform(data_Website, channels=[0, 1, 2])
+    train_data_web, val_data_web = train_test_split(dataset_Website, test_size=0.3, random_state=42)
+    # plot_samples_from_all_labels(dataset_Website,None, list(label_counts_duramat.keys()), data_name='web', outfolder=current_dir+output_folder)
+    save_images_by_label(data_Website, data_loader_2.labels_as_integers, current_dir+'/Data/Webpage_images_new/')
+
+    #################################################### ONLY TRAINING MODE DURAMAT  #########################################################
+    # Model with originally pretrained weights
+    # model = load_model(args, current_dir+'/Data/', device, args.init_weights_name)
+    # trainer = init_trainer(args, model, val_data, current_dir+output_folder)
+    # trainer = train_save_model(trainer, train_data, val_data, current_dir+output_folder+'duramat_3classes_var_new/')
+    # ploting_training_results(trainer, current_dir+output_folder+'duramat_3classes/')
+
+    #################################################### ONLY TRAINING MODE DURAMAT  + bit of webpage #########################################################
+    # Model with originally pretrained weights
+    model = load_model(args, current_dir+'/Data/', device, args.init_weights_name)
+    trainer = CustomTrainer(model, args, train_data, train_data_web, val_data, val_data_web, device,  current_dir+output_folder+'/duramat_3classes_var_new/')
+    trainer.train()
+    trainer = train_save_model(trainer, current_dir+output_folder+'duramat_3classes_var_new/')
+    # ploting_training_results(trainer, current_dir+output_folder+'duramat_3classes_var/')
+
+    # ########### INFINITY ##########
+    # model = load_post_trained_model(args, current_dir+output_folder+'/duramat_3classes_var_new/', device, 'trained_state_dict')
+    # trainer_loaded = CustomTrainer(model, args, train_data, train_data_web, val_data, val_data_web, device,  current_dir+output_folder+'/duramat_3classes_var_new/')
+
     path_Infinity = os.path.dirname(current_dir)+"/eagle-labelling/features_pickle/Infinity_all_no_pool_labels.pkl"
     data_loader =  Load_Data(path_Infinity)
     data_Infinity = data_loader.get_data()
     data_loader.get_label_statistics()
-    data_Infinity = [item for item in data_Infinity if item[1] <= 6]    # Remove data with labels above 3
+    data_Infinity = [item for item in data_Infinity if item[1] <= 2]    # Remove data with labels above 2 - dark class is defined differently in Inifinity than duramat
+
     label_counts_infinity = count_data_per_class(data_Infinity)
     data_Infinity = convert_labels_to_one_hot(data_Infinity, len(label_counts_infinity))
     dataset_Infinity = data_just_transform(data_Infinity, channels=[0])
     data_loader.get_label_statistics()
-    plot_samples_from_all_labels(dataset_Infinity,None, list(label_counts_infinity.keys()), data_name='inf', outfolder=current_dir+output_folder)
 
-    ########### WEBSITE ##########
+    predictions_Infinity = trainer.predict(dataset_Infinity) 
+    # accuracy_Infinity = predictions.metrics['test_accuracy']
+    predlabels_Infinity = predictions_Infinity.argmax(axis=-1)
+    #  predlabels = predictions.predictions.argmax(axis=-1)
+    # Extract the true labels from val_dataset
+    true_labels_Infinity = np.array([label for _, label in dataset_Infinity.df])
+    # Calculate accuracy for each class
+    class_accuracies = {}
+    for label in range(len(label_counts_infinity)):
+        class_accuracies[label] = calculate_class_accuracy_one_hot(true_labels_Infinity, predictions_Infinity.cpu().numpy(), class_label=label)
+        print("Class accuracies:", class_accuracies)
+    exit(0)
+    plot_samples_from_all_labels(dataset_Infinity, predlabels_Infinity, list(label_counts_infinity.keys()), data_name='Infinity', outfolder=current_dir+output_folder)    
+    # ########## Webpage ##########
+    predictions = trainer.predict(val_data)
+    true_labels = np.array([item['labels'] for item in val_data])
+    # pred_labels = (predictions.cpu().numpy() > 0.5).astype(int)
+    pred_labels = logits_to_classes(predictions.cpu().numpy())
+    predlabels = convert_list_of_arrays_to_labels(pred_labels)
+
+    class_accuracies= {}
+    for label in range(len(label_counts_duramat)):
+        class_accuracies[label] = calculate_class_accuracy_one_hot(true_labels, predictions.cpu().numpy(), class_label=label)
+    print("Class accuracies:", class_accuracies)
+    print('END Webpage prediction')
+    plot_samples_from_all_labels(val_data, predlabels, list(label_counts_duramat.keys()), data_name='Duramat', outfolder=current_dir+output_folder)
+
+
+    # print("Class accuracies:", class_accuracies)
+    # plot_samples_from_all_labels(dataset_Infinity,None, list(label_counts_infinity.keys()), data_name='inf', outfolder=current_dir+output_folder)
+    # # Separate images and labels into two lists
+    # labels = [item[1] for item in data_Infinity]  # Extract the labels (tensors)
+    # integer_labels = [torch.where(label == 1)[0][0].item() for label in labels]
+    # save_images_by_label(data_Infinity, integer_labels, current_dir+'/Data/Infinity_images/')
+    # ########### WEBSITE ##########
 
     path_Website = "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage"
     data_loader_2 = Load_Data_Handler(path_Website)
     data_Website = data_loader_2.get_data()
     data_Website = [(item[0], item[1][0:4]) for item in data_Website]    # Remove data with labels above 3
+        # combine class 2 and 3 (they are the same in Duramat data (see presentation))
+    data_Website = [(item[0], item[1] if item[1] != 3 else 2) for item in data_Website]
+    # Remove data with labels above 3
+    data_Website = [item for item in data_Website if item[1] <= 3]
     label_counts_Website = count_data_per_class_in_labels(data_loader_2.labels_as_integers)
     dataset_Website = data_just_transform(data_Website, channels=[0, 1, 2])
-    plot_samples_from_all_labels(dataset_Website,None, list(label_counts_duramat.keys()), data_name='web', outfolder=current_dir+output_folder)
+    # plot_samples_from_all_labels(dataset_Website,None, list(label_counts_duramat.keys()), data_name='web', outfolder=current_dir+output_folder)
 
-    save_images_by_label(data_Website, data_loader_2.labels_as_integers, current_dir+output_folder+'/Webpage_images_new/')
+    # save_images_by_label(data_Website, data_loader_2.labels_as_integers, current_dir+'/Data/Webpage_images_new/')
 
     ########### COMBINE DATASETS ##########
-    label_counts = {key: label_counts_duramat.get(key, 0) + label_counts_infinity.get(key, 0) + 
-                    label_counts_Website.get(key, 0) for key in set(label_counts_duramat) | set(label_counts_infinity)| set(label_counts_Website)}
+    # label_counts = {key: label_counts_duramat.get(key, 0) + label_counts_infinity.get(key, 0) + 
+    #                 label_counts_Website.get(key, 0) for key in set(label_counts_duramat) | set(label_counts_infinity)| set(label_counts_Website)}
 
-    datas = (dataset_Infinity+dataset_duramat)
+    datas = (dataset_duramat)
     train_data, val_data = train_test_split(datas, test_size=0.3, random_state=42)
-    train_data_web, val_data_web = train_test_split(dataset_Website, test_size=0.3, random_state=42)
+    # train_data_web, val_data_web = train_test_split(dataset_Website, test_size=0.3, random_state=42)
     # train_data = combine_datasets_in_batches(train_data, train_data_web, batch_size=args.num_train_epochs)
     # val_data = combine_datasets_in_batches(val_data, val_data_web, batch_size=args.num_train_epochs)
 
@@ -116,11 +195,11 @@ if __name__ == '__main__':
     trainer.train()
     trainer = train_save_model(trainer, current_dir+output_folder+'/all/')
 
-    ###################################### VALIDATION ########################################################
+
     # ########## Duramat + Infinity ##########
     model = load_post_trained_model(args, current_dir+output_folder+'/all/', device, 'trained_state_dict')
     trainer = CustomTrainer(model, args, train_data, train_data_web, val_data, val_data_web, device,  current_dir+output_folder+'/all/')
-    predictions = trainer.predict(val_data)
+
     true_labels = np.array([item['labels'] for item in val_data])
     pred_labels = logits_to_classes(predictions.cpu().numpy())
     predlabels = convert_list_of_arrays_to_labels(pred_labels)
@@ -280,3 +359,50 @@ if __name__ == '__main__':
 
     # print(predictions.metrics)
     
+
+
+        ####################################################CROSS VALIDATION#########################################################
+    # model = load_model(args, current_dir+'/Data/', device, args.init_weights_name)
+    # trainer = CustomTrainer(model, args, train_data, train_data, None, None, device,  current_dir+output_folder+'/all/')
+    # model.eval()
+
+    # class TorchModelWrapper(BaseEstimator):
+    #     def __init__(self, trainer):
+    #         self.trainer = trainer
+
+    #     def fit(self, X, y=None):
+    #         return self
+
+    #     def predict(self, X):
+    #         predictions = self.trainer.predict(X)
+    #         return logits_to_classes(predictions.cpu().numpy())
+
+    # # Wrap the trainer in a scikit-learn compatible estimator
+    # model_wrapper = TorchModelWrapper(trainer)
+
+    # # Perform cross-validation predictions
+    # predictions = cross_val_predict(model_wrapper, datas, y=None, cv=5)
+    # from cleanlab.filter import find_label_issues
+
+    # # Returns indices of likely label errors
+    # label_issues = find_label_issues(
+    #     labels=integer_labels,
+    #     pred_probs=predictions,
+    #     return_indices_ranked_by="self_confidence"  # low model confidence
+    # )
+
+    # print(f"Found {len(label_issues)} potential label issues:\n")
+    # label_folder = 'ISSUES'
+    # os.makedirs(label_folder, exist_ok=True)  # Ensure the directory exists
+    # for i in label_issues:
+        
+    #     image_array = datas[i]['images'].cpu().numpy().squeeze()
+    #     # Ensure the array is in the correct format (uint8)
+    #     if image_array.min() < 0 or image_array.max() <= 1:  # If normalized to [-1, 1] or [0, 1]
+    #         image_array = ((image_array + 1) * 127.5).astype(np.uint8)  # Scale to [0, 255]
+    #     else:
+    #         image_array = image_array.astype(np.uint8)   
+    #     # Save the image
+    #     image = Image.fromarray(image_array)     
+    #     image.save(os.path.join(label_folder, f'image_{i}_{label_names()[integer_labels[i]]}.png'))
+    # ###################################### VALIDATION ########################################################

@@ -12,6 +12,20 @@ import json
 from PIL import Image, ImageEnhance, ImageOps
 import math
 
+def save_data(current_dir, data_Duramat):
+    # Save data_Duramat in a format compatible with torchvision.datasets.ImageFolder
+    output_dir = current_dir + '/Data/Duramat_ImageFolder/'
+    os.makedirs(output_dir, exist_ok=True)
+
+    for idx, (image_np, label) in enumerate(data_Duramat):
+        # Convert one-hot label to integer
+        label_idx = torch.where(label == 1)[0][0].item()
+        label_dir = os.path.join(output_dir, str(label_idx))
+        os.makedirs(label_dir, exist_ok=True)
+        
+        # Save the image as a .png file
+        image_path = os.path.join(label_dir, f'image_{idx}.png')
+        Image.fromarray(image_np).save(image_path)
 def save_images_by_label(images, labels, output_dir):
     """
     Save images into separate folders based on their labels, enhancing contrast for better visibility.
@@ -101,7 +115,7 @@ def logits_to_classes(logits, initial_threshold=0.5):
         
         predicted_classes[i] = pred
     
-    return predicted_classes
+    return probabilities #predicted_classes !!!!! CHANGED
 
 def convert_array_to_labels(array):
     labels = []
@@ -196,7 +210,7 @@ def plot_samples_from_all_labels(ds, predlabels, unique_labels, data_name='Unkno
 
 
 def calculate_class_accuracy_one_hot(true_labels, pred_logits, class_label, threshold=0.5):
-    pred_labels = (pred_logits > threshold).astype(int)
+    pred_labels = (pred_logits > threshold) #.astype(int)
 
 
     # Get the indices of the samples belonging to the specific class

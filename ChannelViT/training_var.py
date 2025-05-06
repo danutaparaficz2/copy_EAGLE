@@ -16,7 +16,7 @@ from channelvit.backbone.hcs_channel_vit import hcs_channelvit_small
 device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
 
 
-def loss_plot(val_loss, outfolder):
+def loss_plot(val_loss, outfolder, flag=''):
     # Plot the losses
     plt.figure(figsize=(10, 5))
     # plt.plot(train_losses, label='Training Loss')
@@ -25,7 +25,7 @@ def loss_plot(val_loss, outfolder):
     plt.ylabel('Loss')
     plt.legend()
     plt.title('Validation Loss')
-    plt.savefig(outfolder+'/loss_plot1.png')
+    plt.savefig(outfolder+'/loss_plot'+flag+'.png')
     plt.close()
 
 class CustomTrainer:
@@ -40,7 +40,7 @@ class CustomTrainer:
         self.optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
         self.criterion = nn.BCEWithLogitsLoss()
         self.best_val_loss = float('inf')
-        self.early_stop_patience = 7
+        self.early_stop_patience = 5
         self.early_stop_counter = 0
         self.output_dir = output_dir
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.1, patience=3, verbose=True)
@@ -107,7 +107,8 @@ class CustomTrainer:
             val_web_metrics = self.compute_metrics(val_dataloader_web)
             print(f"Validation Web Metrics: {val_web_metrics}")
         loss_plot(val_loss_list, self.output_dir)
-        loss_plot(val_loss_web_list, self.output_dir)
+        loss_plot(val_loss_web_list, self.output_dir, flag='web')
+
 
 
     def compute_metrics(self, dataloader):
@@ -178,13 +179,14 @@ def data_just_transform(data, channels=[0], return_labels=True):
         transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5,0.5,0.5], std=[0.5,0.5,0.5])  # Normalize the image
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                std=[0.229, 0.224, 0.225])
         ])
     else:
         transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5], std=[0.5])  # Normalize the image
+            # transforms.Normalize(mean=[0.5], std=[0.5])  # Normalize the image
 
         ])
     dataset_all = PVDataset(data, channels=channels, transform=transform, scale=1, return_labels=return_labels)
@@ -201,7 +203,7 @@ def train_save_model(trainer, outfolder):
 def load_model(args, folder, device, weights_path):
     model = hcs_channelvit_small(patch_size= args.patch_size, in_chans=args.in_chans)
     model.load_state_dict(torch.load(folder+weights_path+'.pth', map_location=device))
-    num_classes = 4  # Replace with the actual number of classes in your dataset
+    num_classes = 3  # Replace with the actual number of classes in your dataset
     model.head = nn.Linear(model.norm.normalized_shape[0], num_classes)
     model.to(device)
     return model
@@ -209,9 +211,10 @@ def load_model(args, folder, device, weights_path):
   # Load the model
 def load_post_trained_model(args, folder, device, weights_path):
     model = hcs_channelvit_small(patch_size= args.patch_size, in_chans=args.in_chans)
-    num_classes = 4  # Replace with the actual number of classes in your dataset
+    num_classes = 3  # Replace with the actual number of classes in your dataset
     model.head = nn.Linear(model.norm.normalized_shape[0], num_classes)
     model.load_state_dict(torch.load(folder+weights_path+'.pth', map_location=device))
 
     model.to(device)
     return model
+
