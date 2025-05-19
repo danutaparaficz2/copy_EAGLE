@@ -12,8 +12,13 @@ from utils import compute_metrics_sigmoid, augment_underrepresented_classes
 from torch.utils.data.dataloader import default_collate
 from matplotlib import pyplot as plt
 from channelvit.backbone.hcs_channel_vit import hcs_channelvit_small
+import os
+import cv2
+import numpy as np
+from tqdm import tqdm
 
 device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
+
 
 
 def loss_plot(val_loss, outfolder, flag=''):
@@ -92,8 +97,8 @@ class CustomTrainer:
             self.scheduler.step(val_loss)
 
             # Early stopping
-            if val_loss < self.best_val_loss:
-                self.best_val_loss = val_loss
+            if val_loss+val_loss_web/10. < self.best_val_loss:
+                self.best_val_loss = val_loss + val_loss_web/10.
                 self.early_stop_counter = 0
                 self.save_model(self.output_dir)
             else:
@@ -179,14 +184,14 @@ def data_just_transform(data, channels=[0], return_labels=True):
         transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                std=[0.229, 0.224, 0.225])
+            transforms.Normalize(mean=[0.5],
+                                 std=[0.5])
         ])
     else:
         transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
-            # transforms.Normalize(mean=[0.5], std=[0.5])  # Normalize the image
+            transforms.Normalize(mean=[0.73], std=[0.17])  # Normalize the image
 
         ])
     dataset_all = PVDataset(data, channels=channels, transform=transform, scale=1, return_labels=return_labels)

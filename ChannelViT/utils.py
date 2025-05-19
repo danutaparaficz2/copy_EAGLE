@@ -11,7 +11,7 @@ import os
 import json
 from PIL import Image, ImageEnhance, ImageOps
 import math
-
+from sklearn.metrics import confusion_matrix
 def save_data(current_dir, data_Duramat):
     # Save data_Duramat in a format compatible with torchvision.datasets.ImageFolder
     output_dir = current_dir + '/Data/Duramat_ImageFolder/'
@@ -58,14 +58,14 @@ def save_images_by_label(images, labels, output_dir):
             green_channel = image[:, :, 1]
             blue_channel = image[:, :, 2]
 
-            # Normalize and enhance contrast for each channel
-            red_channel = normalize_image(red_channel) * 255
-            green_channel = (1- normalize_image(green_channel)) * 255 *0.5 # Brighten green channel
-            blue_channel = (1-normalize_image(blue_channel)) * 255  *0.8 # Brighten blue channel
+            # # Normalize and enhance contrast for each channel
+            # red_channel = normalize_image(red_channel) * 255
+            # green_channel = (1- normalize_image(green_channel)) * 255 *0.5 # Brighten green channel
+            # blue_channel = (1-normalize_image(blue_channel)) * 255  *0.8 # Brighten blue channel
 
-            # Clip values to ensure they remain valid
-            green_channel = np.clip(green_channel, 0, 255)
-            blue_channel = np.clip(blue_channel, 0, 255)
+            # # Clip values to ensure they remain valid
+            # green_channel = np.clip(green_channel, 0, 255)
+            # blue_channel = np.clip(blue_channel, 0, 255)
 
             red_image = Image.fromarray(red_channel.astype(np.uint8))
             green_image = Image.fromarray(green_channel.astype(np.uint8))
@@ -208,6 +208,50 @@ def plot_samples_from_all_labels(ds, predlabels, unique_labels, data_name='Unkno
         plot_samples_from_specific_label(selected_images, selected_predlabels, label, data_name, outfolder)
 
 
+def plot_normalized_confusion_matrix(true_labels, predicted_labels, class_names, output_path=None):
+    """
+    Calculate and plot the normalized confusion matrix (values as percentages).
+
+    Args:
+        true_labels (np.ndarray): Array of true labels (integer labels).
+        predicted_labels (np.ndarray): Array of predicted labels (integer labels).
+        class_names (list): List of class names corresponding to the class indices.
+        output_path (str): Path to save the confusion matrix plot (optional).
+
+    Returns:
+        normalized_cm (np.ndarray): Normalized confusion matrix as a NumPy array.
+    """
+    # Calculate the confusion matrix
+    cm = confusion_matrix(true_labels, predicted_labels)
+
+    # Normalize the confusion matrix by row (percentage of each class)
+    normalized_cm = cm.astype('float') / cm.sum(axis=1, keepdims=True) * 100
+
+    # Plot the normalized confusion matrix
+    plt.figure(figsize=(8, 6))
+    plt.imshow(normalized_cm, interpolation='nearest', cmap='Blues')
+    plt.colorbar()
+    plt.title("Normalized Confusion Matrix")
+    plt.xlabel("Predicted Labels")
+    plt.ylabel("True Labels")
+    plt.xticks(np.arange(len(class_names)), class_names, rotation=45)
+    plt.yticks(np.arange(len(class_names)), class_names)
+
+    # Annotate the matrix with percentage values
+    for i in range(normalized_cm.shape[0]):
+        for j in range(normalized_cm.shape[1]):
+            plt.text(j, i, f"{normalized_cm[i, j]:.1f}%",  # Format as percentage
+                     ha="center", va="center",
+                     color="white" if normalized_cm[i, j] > 50 else "black")  # Adjust text color for visibility
+
+    plt.tight_layout()
+
+    # Save the plot if output_path is provided
+    if output_path:
+        plt.savefig(output_path)
+
+    return normalized_cm
+
 
 def calculate_class_accuracy_one_hot(true_labels, pred_logits, class_label, threshold=0.5):
     pred_labels = (pred_logits > threshold) #.astype(int)
@@ -242,37 +286,45 @@ def normalize_image(image):
 
 
 def augment_underrepresented_classes(datas, label_counts):
+    print("Augmenting underrepresented classes...")
+    print("Augmenting underrepresented classes...")
+    print("Augmenting underrepresented classes...")
 
     augmented_data = []
     # Exclude class 0 from the average count calculation
-    avg_count = np.mean([count for label, count in label_counts.items() if label != 0])
-    threshold = avg_count * 0.75  # Set threshold to 75% of the average count
+    avg_count = np.max([count for label, count in label_counts.items()])
+    threshold = avg_count * 0.85  # Set threshold to 75% of the average count
 
     for label, count in label_counts.items():
+        if label >=3 or count==0:
+            continue
         if count < threshold:
-            samples_to_augment = [data for data in datas if data[1] == label]
+            samples_to_augment = [data for data in datas if data['labels'][label] == 1]
             num_augmentations = int(threshold - count)
+            print('num_augmentations', num_augmentations, label, count, threshold)
             for _ in range(num_augmentations):
                 sample = random.choice(samples_to_augment)
-                image = Image.fromarray(sample[0])
-                
-                # Randomly choose between the two augmentation functions
-                if np.random.rand() > 0.5:
-                    augmented_image = augmentation_fn(image)
-                else:
-                    augmented_image = augmentation_fn_combine(image, datas, label)
-                
-                augmented_data.append((np.array(augmented_image), label))
+                augmented_image = augmentation_fn(sample['images'])
 
-                # # Visualize original and augmented images
+
+                # Randomly choose between the two augmentation functions
+                # if np.random.rand() > 0.5:
+                # else:
+                #     augmented_image = augmentation_fn_combine(image, datas, label)
+                
+                augmented_data.append({'images':augmented_image, 'labels':sample['labels'], 'channels':sample['channels']})
+
+                # Visualize original and augmented images
                 # fig, axes = plt.subplots(1, 2, figsize=(10, 5))
-                # axes[0].imshow(image)
+                # axes[0].imshow(np.array(sample['images'])[0])                
                 # axes[0].set_title('Original Image')
                 # axes[0].axis('off')
-                # axes[1].imshow(augmented_image)
+                # axes[1].imshow(np.array(augmented_image))
                 # axes[1].set_title('Augmented Image')
                 # axes[1].axis('off')
                 # # plt.show()
+                # # Ensure the folder exists before saving the plot
+                # os.makedirs('./Augmented', exist_ok=True)
                 # # Save the plot
                 # plt.savefig(f'./Augmented/augmented_image_{label}_{_}.png')
                 # plt.close()
@@ -281,24 +333,18 @@ def augment_underrepresented_classes(datas, label_counts):
     return datas
 
 def augmentation_fn(image):
-    # Random horizontal flip
     if np.random.rand() > 0.5:
-        image = ImageOps.mirror(image)
-    
-    
-    # Random color enhancement
-    enhancer = ImageEnhance.Color(image)
-    image = enhancer.enhance(np.random.uniform(0.8, 1.2))
-    
-    # Random brightness enhancement
-    enhancer = ImageEnhance.Brightness(image)
-    image = enhancer.enhance(np.random.uniform(0.8, 1.2))
-    
-    # Random contrast enhancement
-    enhancer = ImageEnhance.Contrast(image)
-    image = enhancer.enhance(np.random.uniform(0.8, 1.2))
-    
+        image = torch.flip(image, dims=[2])  # Flip along the width dimension
+
+    fold = np.random.choice([0, 1, 2, 3])
+    image = torch.rot90(image, k=fold, dims=(1, 2))
+    # # # Random contrast enhancement
+    # image = image.convert('L')
+    # enhancer = ImageEnhance.Contrast(image)
+    # image = enhancer.enhance(np.random.uniform(0.8, 1.2))
+
     return image
+
 def combine_images(image1, image2):
     # Resize images to the same size
     image1 = image1.resize((256, 256))
