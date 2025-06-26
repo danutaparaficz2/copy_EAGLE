@@ -113,7 +113,7 @@ if __name__ == '__main__':
     # ########### WEBSITE ##########
 
     path_Website = "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage"
-    data_loader_2 = Load_Data_Handler(path_Website, args, classified_by=["Ebrar", 'Ralf'], excluded=['23-P09-D'])
+    data_loader_2 = Load_Data_Handler(path_Website, args, classified_by=["Ebrar", 'Ralf'], folders_excluded=['23-P09-D'])
     data_Website = data_loader_2.get_data()
     label_counts_Website = count_data_per_class_in_labels(data_loader_2.labels_as_integers)
 

@@ -242,7 +242,7 @@ class Load_Data:
         return label_counts
     
 class Load_Data_Handler:
-    def __init__(self, PATH, args, classified_by=["Ebrar", 'Ralf'],  this_folders_only=[], folder_excluded=[]):
+    def __init__(self, PATH, args, classified_by=["Ebrar", 'Ralf'],  this_folders_only=[], folders_excluded=[]):
         current_dir = os.path.dirname(os.path.abspath(__file__))
         sys.path.append(os.path.join(current_dir, '../eagle-jsonhandler'))
         sys.path.append(os.path.join(current_dir, '../'))
@@ -261,17 +261,17 @@ class Load_Data_Handler:
         # Separate files by their folders
         files_by_folder = separate_files_by_folder(elpaths, labels)
         if args.use_only_EL:
-            self.images_el, self.labels = normalize_image_0_255(files_by_folder, PATH, '_EL_', this_folders_only=this_folders_only, folder_excluded=folder_excluded)
+            self.images_el, self.labels = normalize_image_0_255(files_by_folder, PATH, '_EL_', this_folders_only=this_folders_only, folders_excluded=folders_excluded)
             self.images =self.images_el
         else:
             self.images = [np.stack((el, uv, vis), axis=-1)for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
             for technology in ['_EL_', '_UV_', '_VI_']:
                 if technology == '_EL_':
-                    self.images_el, self.labels = normalize_image_0_255(files_by_folder, PATH, technology, this_folders_only=this_folders_only, folder_excluded=folder_excluded)
+                    self.images_el, self.labels = normalize_image_0_255(files_by_folder, PATH, technology, this_folders_only=this_folders_only, folders_excluded=folders_excluded)
                 elif technology == '_UV_':
-                    self.images_uv, self.labels = normalize_image_0_255(files_by_folder, PATH, technology, this_folders_only=this_folders_only, folder_excluded=folder_excluded)
+                    self.images_uv, self.labels = normalize_image_0_255(files_by_folder, PATH, technology, this_folders_only=this_folders_only, folders_excluded=folders_excluded)
                 elif technology == '_VI_':
-                    self.images_vis, self.labels = normalize_image_0_255(files_by_folder, PATH, technology, this_folders_only=this_folders_only, folder_excluded=folder_excluded)
+                    self.images_vis, self.labels = normalize_image_0_255(files_by_folder, PATH, technology, this_folders_only=this_folders_only, folders_excluded=folders_excluded)
             # self.images_el = [np.array(Image.open(PATH+'/segments/'+path).convert('L')).astype(np.uint8) for path in elpaths]
             # self.images_uv = [np.array(Image.open(PATH+'/segments/'+path).convert('L')).astype(np.uint8) for path in uvpaths]
             # self.images_vis = [np.array(Image.open(PATH+'/segments/'+path).convert('L')).astype(np.uint8) for path in vispaths]
