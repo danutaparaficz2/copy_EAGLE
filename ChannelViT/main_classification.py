@@ -62,11 +62,11 @@ if __name__ == '__main__':
     if args.init_weights_name == 'imagenet_channelvit_small_p16_with_hcs_supervised':
         args.max_channels = 3
     elif args.init_weights_name == 'so2sat_channelvit_small_p8_with_hcs_hard_split_supervised':
-        args.max_channels = 18 # check this
+        args.max_channels = 18 
     elif args.init_weights_name == 'cpjump_cellpaint_bf_channelvit_small_p8_with_hcs_supervised':
-        args.max_channels = 8 # check this
+        args.max_channels = 8 
     elif args.init_weights_name == 'camelyon_channelvit_small_p8_with_hcs_supervised':
-        args.max_channels = 8 # check this
+        args.max_channels = 3 
     else:
         raise ValueError(f"Unknown init_weights_name: {args.init_weights_name}. Please set max_channels accordingly.")
     ######################################### Load the data ##################################################
@@ -184,7 +184,7 @@ if __name__ == '__main__':
     data_Website_D = [(item[0], item[1][0:args.num_classes]) for item in data_Website_D]    # Remove data with labels above 3, from DARK and above
 
     label_counts_Website = count_data_per_class_in_labels(data_loader_3.labels_as_integers)
-    dataset_Website_D = data_just_transform(data_Website_D, channels=[0])
+    dataset_Website_D = data_just_transform(data_Website_D, channels=channels)
 
 
     predictions_Web = trainer.predict(dataset_Website_D) 
