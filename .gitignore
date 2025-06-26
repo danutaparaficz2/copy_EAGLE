@@ -2,8 +2,10 @@ myenv/
 venv_eagle_class/
 Data/
 Data_augmented/
-Augmented/
 *__pycache__/
+ChannelViT_n/
+ChannelViT_n2/
+ChannelViT-main/
 ChannelViT/__pycache__/
 requirements.txt
 *.log

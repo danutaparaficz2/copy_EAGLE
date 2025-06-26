@@ -1,3 +1,4 @@
+from importlib_metadata import files
 import torch
 import re
 import pandas as pd
@@ -7,28 +8,117 @@ import sys
 import os
 import importlib
 from torchvision import transforms
-from utils import label_names
+from utils import label_names, normalize_image
 
 
 
 from collections import defaultdict
 import os
 
-def normalize_image_0_255(files_by_folder, PATH, tech):
+def normalize_image_0_255(files_by_folder, PATH, tech, this_folders_only=[], folder_excluded=None):
     normalized_images = []
+    filtered_labels = []
     for folder, files in files_by_folder.items():
-        updated_filenames = [filename.replace('_EL_', tech) for filename in files]
+        if folder_excluded: 
+            if folder_excluded in folder:
+                # Display and save images in the folder
+                for filename, label in files:
+                    # Allow for one-hot encoding with multiple ones (multi-label)
+                    if isinstance(label, (np.ndarray, list)):
+                        label_indices = [i for i, v in enumerate(label) if v == 1]
+                        if not label_indices:
+                            continue
+                    else:
+                        label_indices = [str(label)]
 
-        # Step 1: Calculate mean and std for the folder
-        mean, std, max, min = calculate_mean_std_per_folder(PATH+'/segments/', updated_filenames)
-        # print(f"Mean: {mean}, Std: {std}", f"Max: {max}, Min: {min}")
+                    image_path = os.path.join(PATH, 'segments', filename)
+                    if tech == '_EL_':
+                        try:
+                            image = Image.open(image_path).convert('L')
+                            # Find corresponding UV and VI images
+                            uv_filename = filename.replace('_EL_', '_UV_')
+                            vi_filename = filename.replace('_EL_', '_VI_')
+                            uv_path = os.path.join(PATH, 'segments', uv_filename)
+                            vi_path = os.path.join(PATH, 'segments', vi_filename)
+                            try:
+                                image_uv = Image.open(uv_path).convert('L')
+                                image_vi = Image.open(vi_path).convert('L')
+                            except Exception as e:
+                                print(f"Could not load UV or VI image for {filename}: {e}")
+                                continue
 
-        # Step 2: Load and normalize images using the calculated mean and std
-        normalized_images.extend(load_and_normalize_images(PATH+'/segments/', updated_filenames, mean, std))
-        # print(np.min([image.min() for image in normalized_images]))
-        # print(np.max([image.max() for image in normalized_images]))
-        # print(f"Loaded and normalized {len(normalized_images)} images.")
-    return normalized_images
+                            import matplotlib.pyplot as plt
+
+                            fig, axs = plt.subplots(1, 3, figsize=(12, 4))
+                            axs[0].imshow((image), cmap='gray')
+                            axs[0].set_title('EL')
+                            axs[1].imshow(255-np.array(image_uv), cmap='gray')
+                            axs[1].set_title('UV ')
+                            axs[2].imshow(255-np.array(image_vi), cmap='gray')
+                            axs[2].set_title('VI')
+                            for ax in axs:
+                                ax.axis('off')
+                            save_folder = os.path.join('Data/images/', folder_excluded)
+                            os.makedirs(save_folder, exist_ok=True)
+                            file_only = os.path.basename(filename.replace('.tif', '.png'))
+                            for label_idx in label_indices:
+                                label_folder = os.path.join(save_folder, label_names(flag='Website')[label_idx])
+                                os.makedirs(label_folder, exist_ok=True)
+                                save_path = os.path.join(label_folder, file_only)
+                                plt.tight_layout()
+                                # Combine all label indices for this image into a string
+                                label_names(flag='Website')
+                                label_indices_str = ",".join(label_names(flag='Website')[idx] for idx in label_indices)
+                                plt.title(f'Labels: {label_indices_str}')
+                                plt.savefig(save_path)
+
+                            plt.close()
+                        except Exception as e:
+                            print(f"Error displaying or saving {image_path}: {e}")
+                continue 
+        if len(this_folders_only) != 0:
+            if any(f in folder for f in this_folders_only):
+                print(folder)
+
+                updated_filenames  = [filename.replace('_EL_', tech) for filename, label in files]
+                mean, std, max, min = calculate_mean_std_per_folder(PATH+'/segments/', updated_filenames)
+                normalized_images.extend(load_and_normalize_images(PATH+'/segments/', updated_filenames, mean, std, max, min))
+                labels = [label for _, label in files]
+                filtered_labels.extend(labels)
+
+        else:   
+            print(folder)
+
+            updated_filenames = [filename.replace('_EL_', tech) for filename, label in files]
+            labels = [label for _, label in files]
+            # Find indices where filenames are duplicated
+            filename_indices = defaultdict(list)
+            for idx, fname in enumerate(updated_filenames):
+                filename_indices[fname].append(idx)
+            duplicate_indices = {fname: idxs for fname, idxs in filename_indices.items() if len(idxs) > 1}
+            if duplicate_indices:
+                print(f"Duplicate filename indices in folder '{folder}' : {duplicate_indices}")
+                # Remove the first occurrence of each duplicate filename from updated_filenames
+                for fname, idxs in duplicate_indices.items():
+                    if idxs:
+                        # Remove the first occurrence
+                        updated_filenames[idxs[1]] = None
+                        labels[idxs[1]] = None  # Also remove the corresponding label
+                # Remove all None entries from updated_filenames and corresponding labels
+                updated_filenames = [f for f in updated_filenames if f is not None]
+                labels = [l for l in labels if l is not None]
+            # Step 1: Calculate mean and std for the folder
+            mean, std, max, min = calculate_mean_std_per_folder(PATH+'/segments/', updated_filenames)
+            # print(f"Mean: {mean}, Std: {std}", f"Max: {max}, Min: {min}")
+
+            # Step 2: Load and normalize images using the calculated mean and std
+            normalized_images.extend(load_and_normalize_images(PATH+'/segments/', updated_filenames, mean, std, max, min))
+            
+            filtered_labels.extend(labels)
+            # print(np.min([image.min() for image in normalized_images]))
+            # print(np.max([image.max() for image in normalized_images]))
+            # print(f"Loaded and normalized {len(normalized_images)} images.")
+    return normalized_images, filtered_labels
 
 def calculate_mean_std_per_folder(folder_path, image_files):
     """
@@ -55,7 +145,7 @@ def calculate_mean_std_per_folder(folder_path, image_files):
     min = np.min(pixel_values)
     return mean, std, max, min
 
-def load_and_normalize_images(folder_path, image_files, mean, std):
+def load_and_normalize_images(folder_path, image_files, mean, std, max, min):
     """
     Load and normalize images from a folder using the given mean and std.
 
@@ -72,14 +162,15 @@ def load_and_normalize_images(folder_path, image_files, mean, std):
     for image_file in image_files:
         image = np.array(Image.open(folder_path+image_file).convert('L')).astype(np.float32)  # Convert to grayscale
         # Normalize the image
-        normalized_image = ((image - mean) / std) * 255.
+        # normalized_image = ((image - mean) / std) * 255.
+        normalized_image = (image - min) / (max - min) * 255
         # Scale back to 0-255 range
         # normalized_image = (normalized_image - normalized_image.min()) / (normalized_image.max() - normalized_image.min()) * 255
         normalized_images.append(normalized_image.astype(np.uint8))
 
     return normalized_images
 
-def separate_files_by_folder(file_paths):
+def separate_files_by_folder(file_paths, labels=None):
     """
     Separate file paths into groups based on their parent folders.
 
@@ -91,10 +182,13 @@ def separate_files_by_folder(file_paths):
     """
     folder_dict = defaultdict(list)
 
-    for file_path in file_paths:
+    for idx, file_path in enumerate(file_paths):
         # Extract the folder name (parent directory)
         folder_name = os.path.dirname(file_path)
-        folder_dict[folder_name].append(file_path)
+        if labels:
+            folder_dict[folder_name].append((file_path, labels[idx]))
+        else:
+            folder_dict[folder_name].append((file_path, 'None'))
 
     return folder_dict
 
@@ -147,42 +241,54 @@ class Load_Data:
         print(label_counts_named)
         return label_counts
     
-    
 class Load_Data_Handler:
-    def __init__(self, PATH):
+    def __init__(self, PATH, args, classified_by=["Ebrar", 'Ralf'],  this_folders_only=[], folder_excluded=None):
         current_dir = os.path.dirname(os.path.abspath(__file__))
         sys.path.append(os.path.join(current_dir, '../eagle-jsonhandler'))
         sys.path.append(os.path.join(current_dir, '../'))
         eagle_jsonhandler = importlib.import_module("JSONHandler")
         
         panellist = eagle_jsonhandler.getGroupedPanelList(PATH+'/overviews/')
-        classified_cells = eagle_jsonhandler.getCellsByAttribute(groupedPanels=panellist, attribute="classifiedBy", values="Ralf")
+        classified_cells = []
+        for classified_by_one in classified_by:
+            classified_cells.extend(eagle_jsonhandler.getCellsByAttribute(groupedPanels=panellist, attribute="classifiedBy", values=classified_by_one))
+
         elpaths, uvpaths, vispaths, labels = eagle_jsonhandler.getCellsImagePathsAndLabels(classified_cells)
-        label_types = ["good", "crack", "cross", "dark", "corrosion"]
-        label_counts = np.sum(labels, axis=0)
+        # label_types = ["good", "crack", "cross", "dark", "corrosion"]
+        # label_counts = np.sum(labels, axis=0)
 
 
         # Separate files by their folders
-        files_by_folder = separate_files_by_folder(elpaths)
+        files_by_folder = separate_files_by_folder(elpaths, labels)
+        if args.use_only_el:
+            self.images_el, self.labels = normalize_image_0_255(files_by_folder, PATH, technology, this_folders_only=this_folders_only, folder_excluded=folder_excluded)
+            self.images =self.images_el
+        else:
+            self.images = [np.stack((el, uv, vis), axis=-1)for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
+            for technology in ['_EL_', '_UV_', '_VI_']:
+                if technology == '_EL_':
+                    self.images_el, self.labels = normalize_image_0_255(files_by_folder, PATH, technology, this_folders_only=this_folders_only, folder_excluded=folder_excluded)
+                elif technology == '_UV_':
+                    self.images_uv, self.labels = normalize_image_0_255(files_by_folder, PATH, technology, this_folders_only=this_folders_only, folder_excluded=folder_excluded)
+                elif technology == '_VI_':
+                    self.images_vis, self.labels = normalize_image_0_255(files_by_folder, PATH, technology, this_folders_only=this_folders_only, folder_excluded=folder_excluded)
+            # self.images_el = [np.array(Image.open(PATH+'/segments/'+path).convert('L')).astype(np.uint8) for path in elpaths]
+            # self.images_uv = [np.array(Image.open(PATH+'/segments/'+path).convert('L')).astype(np.uint8) for path in uvpaths]
+            # self.images_vis = [np.array(Image.open(PATH+'/segments/'+path).convert('L')).astype(np.uint8) for path in vispaths]
+            
+            # Combine the 3 lists of grayscale images into one list of RGB images
+            # self.images = [np.stack((el, uv, vis), axis=-1) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
+            # self.images = [np.concatenate((el, uv, vis), axis=-1) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
+            self.images = [np.stack((el, uv, vis), axis=-1)for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
 
-        for technology in ['_EL_', '_UV_', '_VI_']:
-            if technology == '_EL_':
-                self.images_el = normalize_image_0_255(files_by_folder, PATH, technology)
-            elif technology == '_UV_':
-                self.images_uv = normalize_image_0_255(files_by_folder, PATH, technology)
-            elif technology == '_VI_':
-                self.images_vis = normalize_image_0_255(files_by_folder, PATH, technology)
+        self.labels_as_integers = [np.where(label == 1)[0].tolist() for label in self.labels]
+        self.empty_label_indices = [i for i, label in enumerate(self.labels) if isinstance(label, np.ndarray) and np.all(label == 0)]
 
-        # self.images_el = [np.array(Image.open(PATH+'/segments/'+path).convert('L')).astype(np.uint8) for path in elpaths]
-        # self.images_uv = [np.array(Image.open(PATH+'/segments/'+path).convert('L')).astype(np.uint8) for path in uvpaths]
-        # self.images_vis = [np.array(Image.open(PATH+'/segments/'+path).convert('L')).astype(np.uint8) for path in vispaths]
+        # Remove labels at indices in self.empty_label_indices
+        filtered_images = [img for i, img in enumerate(self.images) if i not in self.empty_label_indices]
+        filtered_labels = [label for i, label in enumerate(self.labels) if i not in self.empty_label_indices]
+        self.data = list(zip(filtered_images, filtered_labels))
         
-        # Combine the 3 lists of grayscale images into one list of RGB images
-        # self.images = [np.stack((el, uv, vis), axis=-1) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
-        # self.images = [np.concatenate((el, uv, vis), axis=-1) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
-        self.images = [np.stack((el, uv, vis), axis=-1)for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
-        self.labels_as_integers = [np.where(label == 1)[0].tolist() for label in labels]
-        self.data = list(zip(self.images, labels))
 
     def get_data(self):
         return self.data
@@ -201,26 +307,40 @@ class Load_Data_Handler_notlabeled:
         current_dir = os.path.dirname(os.path.abspath(__file__))
         
         panelfolder = PATH+'/segments/'+subfolder
-        elpaths = [file for file in os.listdir(panelfolder) if file.split("_")[1].startswith("EL") and file.endswith(".tif")]
-        uvpaths = [file for file in os.listdir(panelfolder) if file.split("_")[1].startswith("UV") and file.endswith(".tif")]
-        vispaths = [file for file in os.listdir(panelfolder) if file.split("_")[1].startswith("VI") and file.endswith(".tif")]
+        elpaths =  [file for file in os.listdir(panelfolder) if "_EL_" in file and file.endswith(".tif")]
+        uvpaths =  [file for file in os.listdir(panelfolder) if "_UV_" in file and file.endswith(".tif")]
+        vispaths = [file for file in os.listdir(panelfolder) if "_VI_" in file and file.endswith(".tif")]
+        
         label_types = ["good", "crack", "cross", "dark", "corrosion"]
         
-        sorted_elpaths = sorted(elpaths, key=lambda x: (int(re.search(r'^(\d+)', x).group(1)), int(re.search(r'Cell(\d+)', x).group(1))))
-        sorted_uvpaths = sorted(uvpaths, key=lambda x: (int(re.search(r'^(\d+)', x).group(1)), int(re.search(r'Cell(\d+)', x).group(1))))
-        sorted_vispaths = sorted(vispaths, key=lambda x: (int(re.search(r'^(\d+)', x).group(1)), int(re.search(r'Cell(\d+)', x).group(1))))
-        assert len(sorted_elpaths) == len(sorted_uvpaths) == len(sorted_vispaths), "Mismatch in number of images across channels"   
+        # sorted_elpaths = sorted(elpaths, key=lambda x: (int(re.search(r'^(\d+)', x).group(1)), int(re.search(r'Cell(\d+)', x).group(1))))
+        # sorted_uvpaths = sorted(uvpaths, key=lambda x: (int(re.search(r'^(\d+)', x).group(1)), int(re.search(r'Cell(\d+)', x).group(1))))
+        # sorted_vispaths = sorted(vispaths, key=lambda x: (int(re.search(r'^(\d+)', x).group(1)), int(re.search(r'Cell(\d+)', x).group(1))))
+        elpaths.sort()
+        uvpaths.sort()
+        vispaths.sort()
+        assert len(elpaths) == len(uvpaths) == len(vispaths), "Mismatch in number of images across channels" 
+        elpaths_with_subfolder = [os.path.join(subfolder, fname) for fname in elpaths]
 
-        self.images_el = [np.array(Image.open(PATH+'/segments/'+subfolder+'/'+path).convert('L')).astype(np.uint8) for path in sorted_elpaths]
-        self.images_uv = [np.array(Image.open(PATH+'/segments/'+subfolder+'/'+path).convert('L')).astype(np.uint8) for path in sorted_uvpaths]
-        self.images_vis = [np.array(Image.open(PATH+'/segments/'+subfolder+'/'+path).convert('L')).astype(np.uint8) for path in sorted_vispaths]
+        files_by_folder = separate_files_by_folder(elpaths_with_subfolder)
+
+        for technology in ['_EL_', '_UV_', '_VI_']:
+            if technology == '_EL_':
+                self.images_el = normalize_image_0_255(files_by_folder, PATH, technology)
+            elif technology == '_UV_':
+                self.images_uv = normalize_image_0_255(files_by_folder, PATH, technology)
+            elif technology == '_VI_':
+                self.images_vis = normalize_image_0_255(files_by_folder, PATH, technology)
+        # self.images_el = [np.array(Image.open(PATH+'/segments/'+subfolder+'/'+path).convert('L')).astype(np.uint8) for path in elpaths]
+        # self.images_uv = [np.array(Image.open(PATH+'/segments/'+subfolder+'/'+path).convert('L')).astype(np.uint8) for path in uvpaths]
+        # self.images_vis = [np.array(Image.open(PATH+'/segments/'+subfolder+'/'+path).convert('L')).astype(np.uint8) for path in vispaths]
 
         # Combine the 3 lists of grayscale images into one list of RGB images
         # self.images = [np.stack((el, uv, vis), axis=-1) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
         # self.images = [np.concatenate((el, uv, vis), axis=-1) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
         self.images = [np.stack((el, uv, vis), axis=-1)for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
         self.data = list(zip(self.images))
-        self.sorted_elpaths=sorted_elpaths
+        self.sorted_elpaths = elpaths
         
     def get_data(self):
         return self.data, self.sorted_elpaths

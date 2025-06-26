@@ -46,14 +46,14 @@ class CustomTrainer:
         self.criterion = nn.BCEWithLogitsLoss()
         self.best_val_loss = float('inf')
         self.early_stop_patience = 5
-        self.early_stop_counter = 0
+        self.early_stop_counter = 5
         self.output_dir = output_dir
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.1, patience=3, verbose=True)
 
 
     def train(self):
-        train_dataloader = DataLoader(self.train_dataset, batch_size=self.args.batch_size, shuffle=True, collate_fn=lambda x: custom_collate_fn(x, self.device))
-        train_dataloader_web = DataLoader(self.train_dataset_web, batch_size=self.args.batch_size, shuffle=True, collate_fn=lambda x: custom_collate_fn(x, self.device))
+        # train_dataloader = DataLoader(self.train_dataset, batch_size=self.args.batch_size, shuffle=True, collate_fn=lambda x: custom_collate_fn(x, self.device))
+        # train_dataloader_web = DataLoader(self.train_dataset_web, batch_size=self.args.batch_size, shuffle=True, collate_fn=lambda x: custom_collate_fn(x, self.device))
         val_dataloader = DataLoader(self.val_dataset, batch_size=self.args.batch_size, shuffle=False, collate_fn=lambda x: custom_collate_fn(x, self.device))
         val_dataloader_web = DataLoader(self.val_dataset_web, batch_size=self.args.batch_size, shuffle=False, collate_fn=lambda x: custom_collate_fn(x, self.device))
         val_loss_list = []
@@ -205,18 +205,16 @@ def train_save_model(trainer, outfolder):
     return trainer
 
   # Load the model
-def load_model(args, folder, device, weights_path):
+def load_model(args, folder, device, weights_path, num_classes):
     model = hcs_channelvit_small(patch_size= args.patch_size, in_chans=args.in_chans)
     model.load_state_dict(torch.load(folder+weights_path+'.pth', map_location=device))
-    num_classes = 3  # Replace with the actual number of classes in your dataset
     model.head = nn.Linear(model.norm.normalized_shape[0], num_classes)
     model.to(device)
     return model
 
   # Load the model
-def load_post_trained_model(args, folder, device, weights_path):
+def load_post_trained_model(args, folder, device, weights_path, num_classes):
     model = hcs_channelvit_small(patch_size= args.patch_size, in_chans=args.in_chans)
-    num_classes = 3  # Replace with the actual number of classes in your dataset
     model.head = nn.Linear(model.norm.normalized_shape[0], num_classes)
     model.load_state_dict(torch.load(folder+weights_path+'.pth', map_location=device))
 

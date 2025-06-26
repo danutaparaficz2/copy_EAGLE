@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import torch.nn.functional as F
+from torch import nn
 
 import random
 import os
@@ -12,21 +13,22 @@ import json
 from PIL import Image, ImageEnhance, ImageOps
 import math
 from sklearn.metrics import confusion_matrix
-def save_data(current_dir, data_Duramat):
-    # Save data_Duramat in a format compatible with torchvision.datasets.ImageFolder
-    output_dir = current_dir + '/Data/Duramat_ImageFolder/'
-    os.makedirs(output_dir, exist_ok=True)
 
-    for idx, (image_np, label) in enumerate(data_Duramat):
-        # Convert one-hot label to integer
-        label_idx = torch.where(label == 1)[0][0].item()
-        label_dir = os.path.join(output_dir, str(label_idx))
-        os.makedirs(label_dir, exist_ok=True)
+def select_images_by_label(ds, predlabels, label):
+    selected_data = []
+    selected_predlabels = []
+    for idx, s in enumerate(ds):
+        if s['labels'][label] == 1:
+                selected_data.append(s)
+                if predlabels is not None:
+                    selected_predlabels.append(predlabels[idx])
+                else:
+                    selected_predlabels = None
         
-        # Save the image as a .png file
-        image_path = os.path.join(label_dir, f'image_{idx}.png')
-        Image.fromarray(image_np).save(image_path)
-def save_images_by_label(images, labels, output_dir):
+    return selected_data, selected_predlabels
+
+
+def save_images_by_label(images, labels, output_dir, flag=''):
     """
     Save images into separate folders based on their labels, enhancing contrast for better visibility.
 
@@ -48,7 +50,7 @@ def save_images_by_label(images, labels, output_dir):
             
         image = image[0]
         # Create a folder for the label
-        label_folder = os.path.join(output_dir, label_names()[label])
+        label_folder = os.path.join(output_dir, label_names(flag=flag)[label])
         os.makedirs(label_folder, exist_ok=True)
 
         # Enhance contrast and save the image
@@ -58,10 +60,10 @@ def save_images_by_label(images, labels, output_dir):
             green_channel = image[:, :, 1]
             blue_channel = image[:, :, 2]
 
-            # # Normalize and enhance contrast for each channel
-            # red_channel = normalize_image(red_channel) * 255
-            # green_channel = (1- normalize_image(green_channel)) * 255 *0.5 # Brighten green channel
-            # blue_channel = (1-normalize_image(blue_channel)) * 255  *0.8 # Brighten blue channel
+            # Normalize and enhance contrast for each channel
+            red_channel = red_channel #* 255
+            green_channel = (255- green_channel) #* 255 # Brighten green channel
+            blue_channel = (255-blue_channel) #* 255  # Brighten blue channel
 
             # # Clip values to ensure they remain valid
             # green_channel = np.clip(green_channel, 0, 255)
@@ -81,41 +83,19 @@ def save_images_by_label(images, labels, output_dir):
             combined_image.save(os.path.join(label_folder, f'image_{i}_rgb_channels.png'))
         elif image.ndim == 2:
             # Normalize and enhance contrast for grayscale images
-            image = normalize_image(image) * 255
+            #image = normalize_image(image) * 255
             image = Image.fromarray(image.astype(np.uint8))
             image.save(os.path.join(label_folder, f'image_{i}.png'))
 
     print(f"Images saved in folders under {output_dir}")
 
-def logits_to_classes(logits, initial_threshold=0.5):
-    """
-    Convert logits to class predictions for multi-label classification with an adaptive threshold.
-
-    Args:
-        logits (torch.Tensor or np.ndarray): The logits output by the model.
-        initial_threshold (float): The initial threshold to apply to the probabilities to determine class membership.
-
-    Returns:
-        np.ndarray: An array of predicted class indices.
-    """
-    # Apply sigmoid to convert logits to probabilities
-    probabilities = torch.sigmoid(torch.tensor(logits)).numpy()
-    
-    # Initialize the predicted classes array
-    predicted_classes = np.zeros_like(probabilities, dtype=int)
-    
-    for i, prob in enumerate(probabilities):
-        # Apply the initial threshold
-        pred = (prob > initial_threshold).astype(int)
-        
-        # If no class is selected, adjust the threshold to select at least one class
-        if np.sum(pred) == 0:
-            max_prob_index = np.argmax(prob)
-            pred[max_prob_index] = 1
-        
-        predicted_classes[i] = pred
-    
-    return probabilities #predicted_classes !!!!! CHANGED
+def threshold_and_max(arr, threshold=0.5):
+    result = (arr > threshold).astype(int)
+    for i, row in enumerate(result):
+        if not row.any():
+            max_idx = arr[i].argmax()
+            row[max_idx] = 1
+    return result
 
 def convert_array_to_labels(array):
     labels = []
@@ -132,27 +112,42 @@ def convert_list_of_arrays_to_labels(list_of_arrays):
     return all_labels
 
 
-def compute_metrics(p: EvalPrediction):
-    preds = p.predictions.argmax(axis=-1)
-    labels = p.label_ids
-    acc = accuracy_score(labels, preds)
-    # loss = log_loss( labels, preds)
-    f1 = f1_score(labels, preds, average='weighted')
+# def compute_metrics(p: EvalPrediction):
+#     preds = p.predictions.argmax(axis=-1)
+#     labels = p.label_ids
+#     acc = accuracy_score(labels, preds)
+#     # loss = log_loss( labels, preds)
+#     f1 = f1_score(labels, preds, average='weighted')
+#     return {
+#         'accuracy': acc,
+#         'f1': f1,
+#     }
+
+def compute_metrics_sigmoid(p):
+
+    def threshold_and_max(arr, threshold=0.5):
+        result = (arr > threshold)
+        for i, row in enumerate(result):
+            if not row.any():
+                max_idx = arr[i].argmax()
+                row[max_idx] = 1
+        return result
+
+    preds = threshold_and_max(torch.sigmoid(torch.tensor(p.predictions)), threshold=0.5)
+
+    labels = torch.tensor(p.label_ids)
+    preds_np = preds.cpu().numpy()
+    labels_np = labels.cpu().numpy()
+    acc = accuracy_score(labels_np, preds_np)
+    f1 = f1_score(labels_np, preds_np, average='weighted')
+    # Compute loss using raw logits and labels
+    logits = torch.tensor(p.predictions)
+    bce_loss = nn.BCEWithLogitsLoss()
+    loss = bce_loss(logits, labels.float()).item()
     return {
         'accuracy': acc,
         'f1': f1,
-    }
-
-def compute_metrics_sigmoid(p):
-    preds = torch.sigmoid(torch.tensor(p.predictions)) > 0.5
-    labels = torch.tensor(p.label_ids)
-    preds = preds.cpu().numpy()
-    labels = labels.cpu().numpy()
-    acc = accuracy_score(labels, preds)
-    f1 = f1_score(labels, preds, average='weighted')
-    return {
-        'accuracy': acc,
-        'f1': f1
+        'loss': loss
     }
 
 def convert_to_one_hot(labels, num_classes=4):
@@ -171,7 +166,7 @@ def convert_to_one_hot(labels, num_classes=4):
     return one_hot_labels.float()
 
 
-def convert_labels_to_one_hot(data, num_classes=4):
+def convert_labels_to_one_hot(data, num_classes=5):
     converted_data = []
     for item in data:
         image, label = item
@@ -188,24 +183,6 @@ def convert_labels_to_one_hot(data, num_classes=4):
             label_one = label_one.sum(axis=0)
         converted_data.append((image, label_one))
     return converted_data
-
-def plot_samples_from_all_labels(ds, predlabels, unique_labels, data_name='Unknown', outfolder='./Data'):
-    def select_images_by_label(ds, predlabels, label):
-        selected_data = []
-        selected_predlabels = []
-        for idx, s in enumerate(ds):
-            if s['labels'][label] == 1:
-                 selected_data.append(s)
-                 if predlabels is not None:
-                    selected_predlabels.append(predlabels[idx])
-                 else:
-                    selected_predlabels = None
-            
-        return selected_data, selected_predlabels
-
-    for label in unique_labels:
-        selected_images, selected_predlabels = select_images_by_label(ds, predlabels, label)
-        plot_samples_from_specific_label(selected_images, selected_predlabels, label, data_name, outfolder)
 
 
 def plot_normalized_confusion_matrix(true_labels, predicted_labels, class_names, output_path=None):
@@ -253,8 +230,8 @@ def plot_normalized_confusion_matrix(true_labels, predicted_labels, class_names,
     return normalized_cm
 
 
-def calculate_class_accuracy_one_hot(true_labels, pred_logits, class_label, threshold=0.5):
-    pred_labels = (pred_logits > threshold) #.astype(int)
+def calculate_class_accuracy_one_hot(true_labels, pred_labels, class_label, threshold=0.5):
+    # pred_labels = (pred_logits > threshold) #.astype(int)
 
 
     # Get the indices of the samples belonging to the specific class
@@ -262,27 +239,29 @@ def calculate_class_accuracy_one_hot(true_labels, pred_logits, class_label, thre
     
     # Get the true and predicted labels for the specific class
     class_true_labels = np.array(true_labels)[class_indices, class_label]
-    class_pred_labels = pred_labels[class_indices, class_label]
+    class_pred_labels = np.array(pred_labels)[class_indices, class_label]
     
     # Calculate the accuracy for the specific class
     class_accuracy = accuracy_score(class_true_labels, class_pred_labels)
     return class_accuracy
 
-def calculate_class_accuracy(true_labels, pred_labels, class_label):
-    # Get the indices of the samples belonging to the specific class
-    class_indices = np.where(np.array(true_labels) == class_label)[0]
+# def calculate_class_accuracy(true_labels, pred_labels, class_label):
+#     # Get the indices of the samples belonging to the specific class
+#     class_indices = np.where(np.array(true_labels) == class_label)[0]
     
-    # Get the true and predicted labels for the specific class
-    class_true_labels = np.array(true_labels)[class_indices]
-    class_pred_labels = pred_labels[class_indices]
+#     # Get the true and predicted labels for the specific class
+#     class_true_labels = np.array(true_labels)[class_indices]
+#     class_pred_labels = pred_labels[class_indices]
     
-    # Calculate the accuracy for the specific class
-    class_accuracy = accuracy_score(class_true_labels, class_pred_labels)
-    return class_accuracy
+#     # Calculate the accuracy for the specific class
+#     class_accuracy = accuracy_score(class_true_labels, class_pred_labels)
+#     return class_accuracy
 
 def normalize_image(image):
     # Normalize the image to the range [0, 1]
-    return (image - image.min()) / (image.max() - image.min())
+    image_np = np.array(image)
+    norm = (image_np - image_np.min()) / (image_np.max() - image_np.min())
+    return (norm).astype(np.uint8)
 
 
 def augment_underrepresented_classes(datas, label_counts):
@@ -296,7 +275,7 @@ def augment_underrepresented_classes(datas, label_counts):
     threshold = avg_count * 0.85  # Set threshold to 75% of the average count
 
     for label, count in label_counts.items():
-        if label >=3 or count==0:
+        if label >3 or count==0:
             continue
         if count < threshold:
             samples_to_augment = [data for data in datas if data['labels'][label] == 1]
@@ -369,49 +348,50 @@ def augmentation_fn_combine(image, data, label):
         image = combine_images(image, other_image)
     
     return image
-    
-def plot_samples(ds_val, predlabels, correct=True, data_name='Unknown', outfolder='./Data'):
-    fig, ax = plt.subplots(6, 6, sharex=True, sharey=True, figsize=(20,20))
-    idx = -1
-    for i in range(6):
-        for j in range(6):
-            while True:
-                idx = np.random.choice(len(ds_val), 1, replace=False)
-                if correct:
-                    if ds_val[int(idx[0])]["labels"]> 0 and ds_val[int(idx[0])]["labels"] == int(predlabels[int(idx[0])]):
-                        break
-                else:
-                    if ds_val[int(idx[0])]["labels"] != int(predlabels[int(idx[0])]):
-                        break
- 
-            s = ds_val[int(idx[0])]
-            image = np.transpose(s['images'], (1, 2, 0))
-            image = normalize_image(image)  # Normalize the image
-            ax[i,j].imshow(image)
-            ax[i,j].set_title(f"G: {s['labels']}\nP: {int(predlabels[int(idx[0])])}")
-            ax[i,j].axis('off')
-    if correct:
-        flag='correct'
+
+
+
+def label_names(flag=''):
+    if flag=='Website':
+                return {
+            0: 'good',
+            1: 'crack',
+            2: 'cross',
+            3: 'dark',
+            4: 'corrosion',
+            5: 'discoloration',
+            6: 'delamination',
+        }
     else:
-        flag='wrong'
-    plt.savefig(outfolder+'samples_'+data_name+'_'+flag+'.png')
+        return {
+            0: 'good',
+            1: 'crack',
+            2: 'cross',
+            3: 'dark',
+            4: 'crack&cross',
+            5: 'crack&dark',
+            6: 'crack&cross&dark',
+            7: 'corrosion',
+            8: 'corrosion&cross',
+            9: 'corrosion&crack&cross',
+            10: 'corrosion&crack'
+        }
 
 
-def label_names():
-    return {
-        0: 'good',
-        1: 'crack',
-        2: 'cross',
-        3: 'dark',
-        4: 'crack&cross',
-        5: 'crack&dark',
-        6: 'crack&cross&dark',
-        7: 'corrosion',
-        8: 'corrosion&cross',
-        9: 'corrosion&crack&cross',
-        10: 'corrosion&crack'
-    }
+def count_data_per_multiclass(data):
+    label_counts = {label: 0 for label in label_names().keys()}
+    label_namessss = {label: 0 for label in label_names().values()}
+    class_names = label_names()
 
+    for _, label in data:
+        label_counts[label] += 1
+        label_namessss[class_names[label]] += 1 
+    # Drop labels with 0 count
+    label_counts = {label: count for label, count in label_counts.items() if count > 0}
+    label_namessss = {label: count for label, count in label_namessss.items() if count > 0}
+    print(label_counts)
+    print(label_namessss)
+          
 def count_data_per_class(data):
     label_counts = {label: 0 for label in label_names().keys()}
     label_namessss = {label: 0 for label in label_names().values()}
@@ -437,27 +417,13 @@ def count_data_per_class(data):
     return label_counts
 
 
-def combine_datasets_in_batches(train_data, train_data_web, batch_size=5):
-    combined_data = []
-    web_index = 0
-    web_len = len(train_data_web) - (len(train_data_web) % batch_size)  # Adjust web_len to discard residual
 
-    for i in range(0, len(train_data), batch_size * 5):
-        # Add a batch from the larger dataset
-        combined_data.extend(train_data[i:i + batch_size * 5])
-
-        # Add a batch from the smaller dataset
-        if web_index < web_len:
-            combined_data.extend(train_data_web[web_index:web_index + batch_size])
-            web_index += batch_size
-
-    return combined_data
 
 def count_data_per_class_in_labels(labelss):
-    label_counts = {label: 0 for label in label_names().keys()}
-    label_namessss = {label: 0 for label in label_names().values()}
+    label_counts = {label: 0 for label in label_names(flag='Website').keys()}
+    label_namessss = {label: 0 for label in label_names(flag='Website').values()}
 
-    class_names = label_names()
+    class_names = label_names(flag='Website')
 
     for labels in labelss:
         for label in labels:
@@ -476,14 +442,14 @@ def count_data_per_class_in_labels(labelss):
             print(f"{class_names[label]}: {count}")
     return label_counts
 
-def is_prime(n):
-    """Check if a number is prime."""
-    if n <= 1:
-        return False
-    for i in range(2, int(math.sqrt(n)) + 1):
-        if n % i == 0:
-            return False
-    return True
+# def is_prime(n):
+#     """Check if a number is prime."""
+#     if n <= 1:
+#         return False
+#     for i in range(2, int(math.sqrt(n)) + 1):
+#         if n % i == 0:
+#             return False
+#     return True
 
 def find_optimal_grid(n):
     """Return the optimal grid dimensions for plotting n images."""
@@ -555,14 +521,14 @@ def plot_samples_from_specific_label(ds, selected_predlabels, label_to_filter, d
             os.makedirs(outfolder)
         plt.savefig(outfolder+f'/samples_{data_name}_label_{label_name}_{channel_name}.png')
 
-def find_last_checkpoint(output_dir):
-    # List all checkpoint directories
-    checkpoints = [d for d in os.listdir(output_dir) if d.startswith('checkpoint-')]
-    checkpoints.sort(key=lambda x: int(x.split('-')[1]))  # Sort by checkpoint number
+# def find_last_checkpoint(output_dir):
+#     # List all checkpoint directories
+#     checkpoints = [d for d in os.listdir(output_dir) if d.startswith('checkpoint-')]
+#     checkpoints.sort(key=lambda x: int(x.split('-')[1]))  # Sort by checkpoint number
 
-    # The last checkpoint will be the one with the highest step number
-    last_checkpoint = checkpoints[-1] if checkpoints else None
-    return last_checkpoint
+#     # The last checkpoint will be the one with the highest step number
+#     last_checkpoint = checkpoints[-1] if checkpoints else None
+#     return last_checkpoint
 
 
 def ploting_training_results(trainer, outfolder, last_checkpoint='', accuracies=[]):
@@ -597,42 +563,172 @@ def ploting_training_results(trainer, outfolder, last_checkpoint='', accuracies=
     plt.savefig(outfolder+'/loss_plot1.png')
     plt.close()
 
-def plot_samples_from_all_labels_with_acc(ds_val, predlabels, accuracy, class_accuracies, correct=True, data_name='Unknown', outfolder='./Data'):
-    unique_labels = np.unique([s['labels'] for s in ds_val])
+def plot_samples_from_all_labels_with_acc(ds_val, predlabels, class_accuracies, data_name='Unknown', outfolder='./Data'):
+    unique_labels = list(class_accuracies.keys())
     for label in unique_labels:
         if class_accuracies.get(label) == 0.:
             break
-        if class_accuracies.get(label) < 0.6:
-            plot_samples_from_specific_label_with_acc(ds_val, predlabels, label, accuracy, class_accuracies, False, data_name, outfolder)
-        else:
-            plot_samples_from_specific_label_with_acc(ds_val, predlabels, label, accuracy, class_accuracies, correct, data_name, outfolder)
+        selected_images, selected_predlabels = select_images_by_label(ds_val, predlabels, label) # selects images that originally are labeled in specific label
 
-def plot_samples_from_specific_label_with_acc(ds_val, predlabels, label_to_filter, accuracy, class_accuracies, correct=True, data_name='Unknown', outfolder='./Data'):
+
+        if class_accuracies.get(label) < 0.9:
+            plot_samples_from_specific_label_with_acc(selected_images, selected_predlabels, label, class_accuracies, False, data_name, outfolder)
+            plot_samples_from_specific_label_with_acc(selected_images, selected_predlabels, label, class_accuracies, True, data_name, outfolder)
+
+        else:
+            plot_samples_from_specific_label_with_acc(selected_images, selected_predlabels, label, class_accuracies, True, data_name, outfolder)
+            plot_samples_from_specific_label_with_acc(selected_images, selected_predlabels, label, class_accuracies, False, data_name, outfolder)
+
+
+def plot_samples_from_specific_label_with_acc(ds_val, predlabels, label_to_filter, class_accuracies, correct=True, data_name='Unknown', outfolder='./Data'):
     fig, ax = plt.subplots(6, 6, sharex=True, sharey=True, figsize=(20,20))
     idx = -1
+
     for i in range(6):
         for j in range(6):
             while True:
                 idx = np.random.choice(len(ds_val), 1, replace=False)
-                if ds_val[int(idx[0])]["labels"] == label_to_filter:
-                    if correct:
-                        if ds_val[int(idx[0])]["labels"] == int(predlabels[int(idx[0])]):
+                if label_to_filter in predlabels[idx[0]] and correct == True:
                             break
-                    else:
-                        if ds_val[int(idx[0])]["labels"] != int(predlabels[int(idx[0])]):
+                if label_to_filter not in predlabels[idx[0]] and correct == False:
                             break
  
-            s = ds_val[int(idx[0])]
+            s = ds_val[idx[0]]
             image = np.transpose(s['images'], (1, 2, 0))
             image = normalize_image(image)  # Normalize the image
-            ax[i,j].imshow(image)
-            ax[i,j].set_title(f"G: {s['labels']}\nP: {int(predlabels[int(idx[0])])}", fontsize=19)
+            ax[i,j].imshow(image, cmap='gray')
+            ax[i,j].set_title(f"G: {label_to_filter}\nP: {predlabels[idx[0]]}", fontsize=19)
             ax[i,j].axis('off')
     if correct:
         flag='correct'
     else:
         flag='wrong'
-    plt.suptitle(f'Total Accuracy of {data_name} is: {accuracy:.3f}. Class Accuracy: {class_accuracies.get(label_to_filter, 0):.3f}', fontsize=30)
+    plt.suptitle(f'Data from {data_name}. Class Accuracy: {class_accuracies.get(label_to_filter, 0):.3f}', fontsize=30)
 
     plt.savefig(outfolder+f'/samples_{data_name}_label_{str(label_to_filter)}_{flag}.png')
 
+
+def class_label_save(predlabels, im_names, label_names,  file_name='predictions_tiso.parquet'):
+    label_counts = {}
+    for label in predlabels:
+        if label in label_counts:
+            label_counts[label] += 1
+        else:
+            label_counts[label] = 1
+    label_counts = dict(sorted(label_counts.items()))
+    print(label_counts)
+    output_dir='./Data/parquet'
+    label_counts_named = {(label_names)[int_label]: count for int_label, count in label_counts.items()}
+    print(label_counts_named)
+    output_predictions_path = os.path.join(output_dir, file_name)
+    predictions_df = pd.DataFrame(predlabels, index=im_names)
+    a = predictions_df.index.str.extract(r'(Cell\d+)')
+    a = pd.DataFrame(a.values, index=predictions_df.index)
+    b = pd.concat([a, predictions_df],axis=1)
+    b.index = b.index.str.replace(r'_Cell\d+', '', regex=True)
+    b.index = b.index.str.replace(r'_EL', '', regex=True)
+    b.index = b.index.map(lambda x: x.replace('.tif', '') if isinstance(x, str) else x)
+    try:
+        b.index = b.index.astype(int)
+    except ValueError:
+        pass
+    b.columns = ['cells','classes']
+    b = b.pivot(columns='cells')
+    b.to_parquet(output_predictions_path, index=True)
+    print(f"Predictions saved to {output_predictions_path}")
+# def plot_samples_from_all_labels(ds, predlabels, unique_labels, data_name='Unknown', outfolder='./Data'):
+
+
+#     for label in unique_labels:
+#         selected_images, selected_predlabels = select_images_by_label(ds, predlabels, label)
+#         plot_samples_from_specific_label(selected_images, selected_predlabels, label, data_name, outfolder)
+
+
+# def save_data(current_dir, data_Duramat):
+#     # Save data_Duramat in a format compatible with torchvision.datasets.ImageFolder
+#     output_dir = current_dir + '/Data/Duramat_ImageFolder/'
+#     os.makedirs(output_dir, exist_ok=True)
+
+#     for idx, (image_np, label) in enumerate(data_Duramat):
+#         # Convert one-hot label to integer
+#         label_idx = torch.where(label == 1)[0][0].item()
+#         label_dir = os.path.join(output_dir, str(label_idx))
+#         os.makedirs(label_dir, exist_ok=True)
+        
+#         # Save the image as a .png file
+#         image_path = os.path.join(label_dir, f'image_{idx}.png')
+#         Image.fromarray(image_np).save(image_path)
+
+
+def logits_to_classes(logits, initial_threshold=0.5):
+    """
+    Convert logits to class predictions for multi-label classification with an adaptive threshold.
+
+    Args:
+        logits (torch.Tensor or np.ndarray): The logits output by the model.
+        initial_threshold (float): The initial threshold to apply to the probabilities to determine class membership.
+
+    Returns:
+        np.ndarray: An array of predicted class indices.
+    """
+    # Apply sigmoid to convert logits to probabilities
+    probabilities = torch.sigmoid(torch.tensor(logits)).numpy()
+    
+    # Initialize the predicted classes array
+    predicted_classes = np.zeros_like(probabilities, dtype=int)
+    
+    for i, prob in enumerate(probabilities):
+        # Apply the initial threshold
+        pred = (prob > initial_threshold).astype(int)
+        
+        # If no class is selected, adjust the threshold to select at least one class
+        if np.sum(pred) == 0:
+            max_prob_index = np.argmax(prob)
+            pred[max_prob_index] = 1
+        
+        predicted_classes[i] = pred
+    
+    return probabilities #predicted_classes !!!!! CHANGED
+    
+# def plot_samples(ds_val, predlabels, correct=True, data_name='Unknown', outfolder='./Data'):
+#     fig, ax = plt.subplots(6, 6, sharex=True, sharey=True, figsize=(20,20))
+#     idx = -1
+#     for i in range(6):
+#         for j in range(6):
+#             while True:
+#                 idx = np.random.choice(len(ds_val), 1, replace=False)
+#                 if correct:
+#                     if ds_val[int(idx[0])]["labels"]> 0 and ds_val[int(idx[0])]["labels"] == int(predlabels[int(idx[0])]):
+#                         break
+#                 else:
+#                     if ds_val[int(idx[0])]["labels"] != int(predlabels[int(idx[0])]):
+#                         break
+ 
+#             s = ds_val[int(idx[0])]
+#             image = np.transpose(s['images'], (1, 2, 0))
+#             image = normalize_image(image)  # Normalize the image
+#             ax[i,j].imshow(image)
+#             ax[i,j].set_title(f"G: {s['labels']}\nP: {int(predlabels[int(idx[0])])}")
+#             ax[i,j].axis('off')
+#     if correct:
+#         flag='correct'
+#     else:
+#         flag='wrong'
+#     plt.savefig(outfolder+'samples_'+data_name+'_'+flag+'.png')
+
+
+# def combine_datasets_in_batches(train_data, train_data_web, batch_size=5):
+#     combined_data = []
+#     web_index = 0
+#     web_len = len(train_data_web) - (len(train_data_web) % batch_size)  # Adjust web_len to discard residual
+
+#     for i in range(0, len(train_data), batch_size * 5):
+#         # Add a batch from the larger dataset
+#         combined_data.extend(train_data[i:i + batch_size * 5])
+
+#         # Add a batch from the smaller dataset
+#         if web_index < web_len:
+#             combined_data.extend(train_data_web[web_index:web_index + batch_size])
+#             web_index += batch_size
+
+#     return combined_data
