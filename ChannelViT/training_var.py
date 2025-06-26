@@ -206,7 +206,7 @@ def train_save_model(trainer, outfolder):
 
   # Load the model
 def load_model(args, folder, device, weights_path, num_classes):
-    model = hcs_channelvit_small(patch_size= args.patch_size, in_chans=args.in_chans)
+    model = hcs_channelvit_small(patch_size= args.patch_size, in_chans=args.max_channels)
     model.load_state_dict(torch.load(folder+weights_path+'.pth', map_location=device))
     model.head = nn.Linear(model.norm.normalized_shape[0], num_classes)
     model.to(device)
@@ -214,7 +214,7 @@ def load_model(args, folder, device, weights_path, num_classes):
 
   # Load the model
 def load_post_trained_model(args, folder, device, weights_path, num_classes):
-    model = hcs_channelvit_small(patch_size= args.patch_size, in_chans=args.in_chans)
+    model = hcs_channelvit_small(patch_size= args.patch_size, in_chans=args.max_channels)
     model.head = nn.Linear(model.norm.normalized_shape[0], num_classes)
     model.load_state_dict(torch.load(folder+weights_path+'.pth', map_location=device))
 

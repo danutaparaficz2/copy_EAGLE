@@ -24,9 +24,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train and evaluate the model.")
     parser.add_argument('--num_train_epochs', type=int, default=29, help='Number of training epochs.')
     parser.add_argument('--batch_size', type=int, default=5, help='Batch size for training and evaluation.')
-    parser.add_argument('--in_chans', type=int, default=3, help='Number of input channels.')
     parser.add_argument('--retrain', action='store_true', default=True, help='Flag to retrain the model.')
-    parser.add_argument('--use_only_el', action='store_true', default=True, help='Use only El images')
+    parser.add_argument('--use_only_EL', action='store_true', default=True, help='Use only El images')
 
     parser.add_argument('--num_classes', type=int, default=7, help='Number of classes.')     
     parser.add_argument('--learning_rate', type=float, default=1e-5, help='Learning rate for training.')     
@@ -59,8 +58,17 @@ if __name__ == '__main__':
     device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
     output_model_folder = '/Data/models/model_with_'+args.init_weights_name+'/epochs_'+str(args.num_train_epochs)+'/'
     input_model_folder = '/Data/models/'
-
     images_folder = '/Data/images/'
+    if args.init_weights_name == 'imagenet_channelvit_small_p16_with_hcs_supervised':
+        args.max_channels = 3
+    elif args.init_weights_name == 'so2sat_channelvit_small_p8_with_hcs_hard_split_supervised':
+        args.max_channels = 18 # check this
+    elif args.init_weights_name == 'cpjump_cellpaint_bf_channelvit_small_p8_with_hcs_supervised':
+        args.max_channels = 8 # check this
+    elif args.init_weights_name == 'camelyon_channelvit_small_p8_with_hcs_supervised':
+        args.max_channels = 8 # check this
+    else:
+        raise ValueError(f"Unknown init_weights_name: {args.init_weights_name}. Please set max_channels accordingly.")
     ######################################### Load the data ##################################################
     ########### DURAMAT ##########
     # path_Duramat = "/Users/eagle/FFHS/eagle-bfe - data/Duramat_no_pool_labels.pkl"
@@ -105,7 +113,7 @@ if __name__ == '__main__':
     # ########### WEBSITE ##########
 
     path_Website = "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage"
-    data_loader_2 = Load_Data_Handler(path_Website, args, classified_by=["Ebrar", 'Ralf'], folder_excluded='23-P09-D')
+    data_loader_2 = Load_Data_Handler(path_Website, args, classified_by=["Ebrar", 'Ralf'], excluded=['23-P09-D'])
     data_Website = data_loader_2.get_data()
     label_counts_Website = count_data_per_class_in_labels(data_loader_2.labels_as_integers)
 
@@ -124,9 +132,11 @@ if __name__ == '__main__':
     
     # data_Website = data_Website_Ebrar + data_Website_Ralf
     # save_images_by_label(data_Website, data_loader_2.labels_as_integers, current_dir+images_folder+'/Webpage_images_Ebrar_Ralf', flag='Website')    #
-
-    dataset_Website = data_just_transform(data_Website, channels=[0])
-
+    if args.use_only_EL:
+        channels=[0]
+    else:
+        channels=[0,1,2]
+    dataset_Website = data_just_transform(data_Website, channels=channels)
     train_data_web, val_data_web = train_test_split(dataset_Website, test_size=0.3, random_state=42)
     train_data_web = augment_underrepresented_classes(train_data_web, label_counts_Website)
 
@@ -137,12 +147,12 @@ if __name__ == '__main__':
         if args.retrain:
             model = load_model(args, current_dir+input_model_folder, device, args.init_weights_name, args.num_classes)
             trainer = init_trainer(args, model, val_data_web, current_dir+output_model_folder)
-            trainer = train_save_model(trainer, train_data_web, val_data_web, current_dir+output_model_folder+'website_1classes_var_new/')
-            ploting_training_results(trainer, current_dir+output_model_folder+'website_1classes_var_new/')
+            trainer = train_save_model(trainer, train_data_web, val_data_web, current_dir+output_model_folder+'website_'+str(len(channels))+'classes_var_new/')
+            ploting_training_results(trainer, current_dir+output_model_folder+'website_'+str(len(channels))+'classes_var_new/')
         else:
-            model = load_post_trained_model(args, current_dir+output_model_folder+'website_1classes_var_new/', device, 'trained_state_dict', args.num_classes)
+            model = load_post_trained_model(args, current_dir+output_model_folder+'website_'+str(len(channels))+'classes_var_new/', device, 'trained_state_dict', args.num_classes)
             model.eval()
-            trainer = init_trainer(args, model, val_data_web, current_dir+output_model_folder+'website_1classes_var_new/')
+            trainer = init_trainer(args, model, val_data_web, current_dir+output_model_folder+'website_'+str(len(channels))+'classes_var_new/')
 
     else:
         if args.retrain:
@@ -167,7 +177,7 @@ if __name__ == '__main__':
 
     # #################################################  PREDICTIONS #########################################################
     # #################################################  PREDICTIONS #########################################################
-    data_loader_3 = Load_Data_Handler(path_Website, classified_by=["Ebrar"], this_folder_only='23-P09-D')
+    data_loader_3 = Load_Data_Handler(path_Website, classified_by=["Ebrar"], this_folders_only=['23-P09-D'])
     data_Website_D = data_loader_3.get_data()
    # save_images_by_label(data_Website, data_loader_3.labels_as_integers, current_dir+images_folder+'/Webpage_images_Ebrar_test', flag='Website')
 

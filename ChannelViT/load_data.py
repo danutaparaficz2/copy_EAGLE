@@ -15,12 +15,12 @@ from utils import label_names, normalize_image
 from collections import defaultdict
 import os
 
-def normalize_image_0_255(files_by_folder, PATH, tech, this_folders_only=[], folder_excluded=None):
+def normalize_image_0_255(files_by_folder, PATH, tech, this_folders_only=[], folders_excluded=[]):
     normalized_images = []
     filtered_labels = []
     for folder, files in files_by_folder.items():
-        if folder_excluded: 
-            if folder_excluded in folder:
+        if len(folders_excluded) != 0:
+            if any(f in folder for f in folders_excluded):
                 # Display and save images in the folder
                 for filename, label in files:
                     # Allow for one-hot encoding with multiple ones (multi-label)
@@ -242,7 +242,7 @@ class Load_Data:
         return label_counts
     
 class Load_Data_Handler:
-    def __init__(self, PATH, args, classified_by=["Ebrar", 'Ralf'],  this_folders_only=[], folder_excluded=None):
+    def __init__(self, PATH, args, classified_by=["Ebrar", 'Ralf'],  this_folders_only=[], folder_excluded=[]):
         current_dir = os.path.dirname(os.path.abspath(__file__))
         sys.path.append(os.path.join(current_dir, '../eagle-jsonhandler'))
         sys.path.append(os.path.join(current_dir, '../'))
@@ -260,8 +260,8 @@ class Load_Data_Handler:
 
         # Separate files by their folders
         files_by_folder = separate_files_by_folder(elpaths, labels)
-        if args.use_only_el:
-            self.images_el, self.labels = normalize_image_0_255(files_by_folder, PATH, technology, this_folders_only=this_folders_only, folder_excluded=folder_excluded)
+        if args.use_only_EL:
+            self.images_el, self.labels = normalize_image_0_255(files_by_folder, PATH, '_EL_', this_folders_only=this_folders_only, folder_excluded=folder_excluded)
             self.images =self.images_el
         else:
             self.images = [np.stack((el, uv, vis), axis=-1)for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
