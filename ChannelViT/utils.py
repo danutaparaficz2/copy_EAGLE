@@ -13,6 +13,8 @@ import json
 from PIL import Image, ImageEnhance, ImageOps
 import math
 from sklearn.metrics import confusion_matrix
+import matplotlib.pyplot as plt
+from sklearn.metrics import ConfusionMatrixDisplay
 
 def select_images_by_label(ds, predlabels, label):
     selected_data = []
@@ -177,10 +179,14 @@ def convert_labels_to_one_hot(data, num_classes=5):
                 label_index.append(list(label_names().values()).index(label))
             label_one = convert_to_one_hot(label_index, num_classes=num_classes)
             label_one = label_one.sum(axis=0)
+            # make it a tensor
+            # label_one = torch.tensor(label_one, dtype=torch.float32)
         else:
             label_index = [label]
             label_one = convert_to_one_hot(label_index, num_classes=num_classes)
             label_one = label_one.sum(axis=0)
+            # make it a tensor
+            # label_one = torch.tensor(label_one, dtype=torch.float32)
         converted_data.append((image, label_one))
     return converted_data
 
@@ -229,6 +235,27 @@ def plot_normalized_confusion_matrix(true_labels, predicted_labels, class_names,
 
     return normalized_cm
 
+def confusion_matrix_per_class(pred_labels, true_labels, plot=False, normalize=False):
+    # For each class, print and plot the confusion matrix
+    cm = {}
+    for class_idx in range(true_labels.shape[1]):
+        y_true = true_labels[:, class_idx]
+        y_pred = pred_labels[:, class_idx]
+        cm[class_idx] = confusion_matrix(y_true, y_pred, normalize='true' if normalize else None)
+        if normalize:
+            title = f"Normalized confusion matrix for class {class_idx}"
+        else:
+            title = f"Confusion matrix for class {class_idx}"
+ 
+        print(title)
+        print(cm[class_idx])
+        if plot:
+            plt.figure(figsize=(8, 6))
+            disp = ConfusionMatrixDisplay(confusion_matrix=cm[class_idx])
+            disp.plot()
+            plt.title(title)
+            plt.savefig(f"confusion_matrix_class_{class_idx}.png")
+    return cm
 
 def calculate_class_accuracy_one_hot(true_labels, pred_labels, class_label, threshold=0.5):
     # pred_labels = (pred_logits > threshold) #.astype(int)
@@ -264,34 +291,40 @@ def normalize_image(image):
     return (norm).astype(np.uint8)
 
 
-def augment_underrepresented_classes(datas, label_counts):
+def augment_underrepresented_classes(datas):
     print("Augmenting underrepresented classes...")
     print("Augmenting underrepresented classes...")
     print("Augmenting underrepresented classes...")
+    label_counts = {label: 0 for label in range(len(datas[0][1]))}
+    for data in datas:
+        for label, value in enumerate(data[1]):
+            if value == 1:
+                label_counts[label] += 1
 
+    print(label_counts)
     augmented_data = []
     # Exclude class 0 from the average count calculation
     avg_count = np.max([count for label, count in label_counts.items()])
     threshold = avg_count * 0.85  # Set threshold to 75% of the average count
 
     for label, count in label_counts.items():
-        if label >3 or count==0:
+        if count==0:
             continue
         if count < threshold:
-            samples_to_augment = [data for data in datas if data['labels'][label] == 1]
-            num_augmentations = int(threshold - count)
+            samples_to_augment = [data for data in datas if data[1][label] == 1]
+            num_augmentations = min(int(threshold - count), int(count*4))
+            #choose smaller
             print('num_augmentations', num_augmentations, label, count, threshold)
             for _ in range(num_augmentations):
                 sample = random.choice(samples_to_augment)
-                augmented_image = augmentation_fn(sample['images'])
+                augmented_image = augmentation_fn(sample[0])
 
 
                 # Randomly choose between the two augmentation functions
                 # if np.random.rand() > 0.5:
                 # else:
                 #     augmented_image = augmentation_fn_combine(image, datas, label)
-                
-                augmented_data.append({'images':augmented_image, 'labels':sample['labels'], 'channels':sample['channels']})
+                augmented_data.append({0:augmented_image, 1:sample[1]})
 
                 # Visualize original and augmented images
                 # fig, axes = plt.subplots(1, 2, figsize=(10, 5))
@@ -672,7 +705,7 @@ def logits_to_classes(logits, initial_threshold=0.5):
         np.ndarray: An array of predicted class indices.
     """
     # Apply sigmoid to convert logits to probabilities
-    probabilities = torch.sigmoid(torch.tensor(logits)).numpy()
+    probabilities = torch.sigmoid(torch.tensor(logits[0])).numpy()
     
     # Initialize the predicted classes array
     predicted_classes = np.zeros_like(probabilities, dtype=int)

@@ -49,7 +49,8 @@ class CustomTrainer:
         self.early_stop_counter = 5
         self.output_dir = output_dir
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.1, patience=3, verbose=True)
-
+        if not hasattr(args, "batch_eval_metrics"):
+            args.batch_eval_metrics = False  # or True, depending on your needs
 
     def train(self):
         # train_dataloader = DataLoader(self.train_dataset, batch_size=self.args.batch_size, shuffle=True, collate_fn=lambda x: custom_collate_fn(x, self.device))
@@ -146,10 +147,9 @@ class CustomTrainer:
                 images = batch['images'].to(self.device)
                 outputs = self.model(images, extra_tokens=batch)
                 all_outputs.append(outputs)
-  
 
         all_outputs = torch.cat(all_outputs, dim=0)
-        return all_outputs
+        return all_outputs.detach().cpu().numpy()
     
 
     def evaluate(self, dataloader):
@@ -177,24 +177,30 @@ def custom_collate_fn(examples, device):
     rest = {k: default_collate([torch.tensor(example[k]).int().to(device) for example in examples]) for k in examples[0] if k != 'images'}
     return {'images': images, **rest}
 
-def data_just_transform(data, channels=[0], return_labels=True):
+def data_just_transform(data, channels=[0], return_labels=True, all_colors=False):
     # Define a custom transform to normalize the images to the range [0, 1]
 
-    if len(channels) > 1:
-        transform = transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5],
-                                 std=[0.5])
-        ])
-    else:
-        transform = transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.73], std=[0.17])  # Normalize the image
 
-        ])
-    dataset_all = PVDataset(data, channels=channels, transform=transform, scale=1, return_labels=return_labels)
+    transform_rgb = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+
+    transform_el = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.5],
+                                std=[0.5])  # Normalize the image
+    ])
+
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.73], std=[0.17])  # Normalize the image
+
+    ])
+    dataset_all = PVDataset(data, channels=channels, transform=transform, transform_el=transform_el, transform_rgb=transform_rgb, scale=1, return_labels=return_labels)
     return  dataset_all
 
 def train_save_model(trainer, outfolder):

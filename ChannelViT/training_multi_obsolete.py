@@ -15,6 +15,27 @@ from utils import compute_metrics_sigmoid, augment_underrepresented_classes
 
 
 class CustomTrainer(Trainer):
+    def __init__(self, *args, train_batch_sampler=None, eval_batch_sampler=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.train_batch_sampler = train_batch_sampler
+        self.eval_batch_sampler = eval_batch_sampler
+
+    def get_train_dataloader(self):
+        return torch.utils.data.DataLoader(
+            self.train_dataset,
+            batch_sampler=self.train_batch_sampler,
+            collate_fn=self.data_collator,
+            num_workers=4,
+        )
+
+    def get_eval_dataloader(self, eval_dataset=None):
+        eval_dataset = eval_dataset if eval_dataset is not None else self.eval_dataset
+        return torch.utils.data.DataLoader(
+            eval_dataset,
+            batch_sampler=self.eval_batch_sampler,
+            collate_fn=self.data_collator,
+            num_workers=4,
+        )
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
 
         labels = inputs['labels']
@@ -29,10 +50,11 @@ class CustomTrainer(Trainer):
         return nn.BCEWithLogitsLoss(outputs, labels)
     
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
+        device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
 
-        labels = inputs['labels']
+        labels = inputs['labels'].to(device)
         with torch.no_grad():
-            outputs = model(inputs['images'], extra_tokens=inputs)
+            outputs = model(inputs['images'].to(device), extra_tokens={'channels':inputs['channels'].to(device)})
         if prediction_loss_only:
             loss = self.compute_loss_function(outputs, labels)
             return (loss, None, None)
@@ -41,13 +63,13 @@ class CustomTrainer(Trainer):
 # we need to collate the data to be able to use multiple inputs images and labels and channels
 def custom_collate_fn(examples):
  #   images = {k: default_collate([example[k] for example in examples]) for k in examples[0] if k == 'images'}
-
+    
     images = torch.stack([example['images'].float() for example in examples])
     rest = {k: default_collate([torch.tensor(example[k]).int() for example in examples]) for k in examples[0] if k != 'images'}
     return {'images': images, **rest}
     
 
-def init_trainer(args, model, val_dataset, outfolder):
+def init_trainer(args, model, val_dataset, outfolder, sampler_train=None, sampler_val=None, concat_train=None, concat_val=None):
 
     training_args = TrainingArguments(output_dir=outfolder,
                                     per_device_train_batch_size= args.batch_size,
@@ -70,8 +92,10 @@ def init_trainer(args, model, val_dataset, outfolder):
         args=training_args,
         data_collator=custom_collate_fn,
         compute_metrics=compute_metrics_sigmoid,
-        eval_dataset = val_dataset,
-    )
+        train_batch_sampler=sampler_train,
+        eval_batch_sampler=sampler_val,    
+        train_dataset=concat_train,
+        eval_dataset=concat_val)
     return trainer
 
 def get_label_statistics(labels_as_integers):
@@ -129,18 +153,17 @@ def train_save_model(trainer, train_dataset, val_dataset, outfolder):
     return trainer
 
   # Load the model
-def load_model(args, folder, device, weights_path):
+def load_model(args, folder, device, weights_path, num_classes):
     model = hcs_channelvit_small(patch_size= args.patch_size, in_chans=args.max_channels)
     model.load_state_dict(torch.load(folder+weights_path+'.pth', map_location=device))
-    num_classes = 4  # Replace with the actual number of classes in your dataset
+    # num_classes = 4  # Replace with the actual number of classes in your dataset
     model.head = nn.Linear(model.norm.normalized_shape[0], num_classes)
     model.to(device)
     return model
 
   # Load the model
-def load_post_trained_model(args, folder, device, weights_path):
+def load_post_trained_model(args, folder, device, weights_path, num_classes):
     model = hcs_channelvit_small(patch_size= args.patch_size, in_chans=args.max_channels)
-    num_classes = 4  # Replace with the actual number of classes in your dataset
     model.head = nn.Linear(model.norm.normalized_shape[0], num_classes)
     model.load_state_dict(torch.load(folder+weights_path+'.pth', map_location=device))
 

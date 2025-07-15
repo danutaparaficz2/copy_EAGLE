@@ -5,11 +5,11 @@ import re
 import argparse
 PYTORCH_ENABLE_MPS_FALLBACK=1
 #### Local imports
-from load_data import Load_Data, AlternatingBatchSampler, PVDataset, Load_Data_Handler, Load_Data_Handler_notlabeled, just_transform
+from load_data import Load_Data, PVDataset, Load_Data_Handler, Load_Data_Handler_notlabeled
 from utils import  (count_data_per_class, convert_list_of_arrays_to_labels, calculate_class_accuracy_one_hot, class_label_save, 
 convert_labels_to_one_hot, label_names, augment_underrepresented_classes, logits_to_classes, plot_normalized_confusion_matrix,ploting_training_results,
 count_data_per_class_in_labels, threshold_and_max, save_images_by_label, count_data_per_multiclass, plot_samples_from_all_labels_with_acc, confusion_matrix_per_class)
-from training_var import  data_just_transform
+from training_var import CustomTrainer, train_save_model, data_just_transform, load_model, load_post_trained_model
 #from training_multi_obsolete import train_save_model, data_just_transform, init_trainer
 
 from sklearn.model_selection import train_test_split
@@ -22,11 +22,10 @@ from sklearn.base import BaseEstimator
 def parse_args():
 
     parser = argparse.ArgumentParser(description="Train and evaluate the model.")
-    parser.add_argument('--num_train_epochs', type=int, default=10, help='Number of training epochs.')
+    parser.add_argument('--num_train_epochs', type=int, default=29, help='Number of training epochs.')
     parser.add_argument('--batch_size', type=int, default=5, help='Batch size for training and evaluation.')
     parser.add_argument('--retrain', action='store_true', default=False, help='Flag to retrain the model.')
     parser.add_argument('--use_only_EL', action='store_true', default=False, help='Use only El images')
-    parser.add_argument('--all_colors', action='store_true', default=True, help='Use only RGB images')
 
     parser.add_argument('--num_classes', type=int, default=7, help='Number of classes.')     
     parser.add_argument('--learning_rate', type=float, default=1e-5, help='Learning rate for training.')     
@@ -51,7 +50,33 @@ def parse_args():
 args = parse_args()
 
 
+
+
 if __name__ == '__main__':
+
+    def load_data(path, type='duramat'):
+        os.makedirs("data", exist_ok=True)
+        if type == 'duramat':
+            filename = 'duramat.pkl'
+        elif type == 'website_train':
+            filename = 'website_train.pkl'
+        elif type == 'website_test':
+            filename = 'website_test.pkl'
+        pkl_file = os.path.join("data", filename)
+        if os.path.exists(pkl_file):
+            with open(pkl_file, 'rb') as f:
+                data_loader = pickle.load(f)
+        else:
+            if type == 'duramat':
+                data_loader =  Load_Data(path)
+            elif type == 'website_train':
+                data_loader = Load_Data_Handler(path, args, classified_by=["Ebrar","Ralf"], folders_excluded=[ '23-P09-D','PVVintage'])
+            elif type == 'website_test':
+                Load_Data_Handler(path_Website, args, classified_by=["Ebrar","Ralf"], this_folders_only=['23-P09-D'])
+            with open(pkl_file, 'wb') as f:
+                pickle.dump(data_loader, f)
+        
+        return data_loader
 
     ######################################### Set the parameters ##################################################
 
@@ -60,17 +85,6 @@ if __name__ == '__main__':
     output_model_folder = '/Data/models/model_with_'+args.init_weights_name+'/epochs_'+str(args.num_train_epochs)+'/'
     input_model_folder = '/Data/models/'
     images_folder = '/Data/images/'
-    if args.all_colors:
-        name_flag = 'rgb'
-    else:
-        name_flag = 'gray'
-    if args.use_only_EL:
-        channels=[0]
-    else:
-        if args.all_colors:
-            channels=[0,1,2,3,4,5,6]
-        else:
-            channels=[0,1,2]
     if args.init_weights_name == 'imagenet_channelvit_small_p16_with_hcs_supervised':
         args.max_channels = 3
     elif args.init_weights_name == 'so2sat_channelvit_small_p8_with_hcs_hard_split_supervised':
@@ -83,16 +97,15 @@ if __name__ == '__main__':
         raise ValueError(f"Unknown init_weights_name: {args.init_weights_name}. Please set max_channels accordingly.")
     ######################################### Load the data ##################################################
     ########### DURAMAT ##########
-    if os.path.exists(current_dir+'/Data/processed_'+name_flag+'.pth'):
-        with open(current_dir+'/Data/processed_'+name_flag+'.pth', 'rb') as f:
-            data = torch.load(f)
-            data_Website = data['data_Website']
-            data_Duramat = data['data_Duramat']
-    else:
+    if args.one_type_of_input_only:
         path_Duramat = "/Users/eagle/FFHS/eagle-bfe - data/Duramat_no_pool_labels.pkl"
+        # Loop over a directory to read pickle files
+
         directory_path = os.path.dirname(current_dir)+"/eagle-labelling/features_pickle/"
+
         path_Duramat = "/Users/eagle/FFHS/eagle-bfe - data/Duramat_no_pool_labels.pkl"
-        data_loader =  Load_Data(path_Duramat)
+        data_loader = load_data(path_Duramat, type='duramat')
+
         data_Duramat = data_loader.get_data()
         label_counts_duramat = count_data_per_class(data_Duramat)
         count_data_per_multiclass(data_Duramat)
@@ -109,103 +122,83 @@ if __name__ == '__main__':
         integer_labels = [torch.argmax(item[1]).item() for item in data_Duramat]  # Convert one-hot encoded labels to integers
     
         # save_images_by_label(data_Duramat, integer_labels, current_dir+images_folder+'/Duramat_images/')
-        # dataset_duramat = just_transform(data_Duramat, channels=[0])
-        # # plot_samples_from_all_labels(dataset_duramat,None, list(label_counts_duramat.keys()), data_name='dur', outfolder=current_dir+images_folder)
+        
+        dataset_duramat = data_just_transform(data_Duramat, channels=[0])
+        # plot_samples_from_all_labels(dataset_duramat,None, list(label_counts_duramat.keys()), data_name='dur', outfolder=current_dir+images_folder)
 
-        # ########### WEBSITE ##########
-        path_Website = "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage"
-        data_loader_2 = Load_Data_Handler(path_Website, args, classified_by=["Ebrar","Ralf"], folders_excluded=[ 'PVVintage']) #, '23-P09-C', '23-P09-D', '23-P09-E', 'C14-A', 'C14-C','C14-I'
-        data_Website = data_loader_2.get_data()
-        label_counts_Website = count_data_per_class_in_labels(data_loader_2.labels_as_integers)
+        train_data, val_data = train_test_split(dataset_duramat, test_size=0.3, random_state=42)
 
-        save_images_by_label(data_Website, data_loader_2.labels_as_integers, current_dir+images_folder+'/Webpage_images_Ebrar_Ralf_'+name_flag, flag='Website')
+        label_counts = {label: 0 for label in range(len(train_data[0]['labels']))}
+        for data in train_data:
+            for label, value in enumerate(data['labels']):
+                if value == 1:
+                    label_counts[label] += 1
 
-        data_Website = [(item[0], item[1][0:args.num_classes]) for item in data_Website]    # Remove data with labels above 3, from DARK and above
-        # save_images_by_label(data_Website, data_loader_2.labels_as_integers, current_dir+images_folder+'/Webpage_images_Ebrar_Ralf', flag='Website')    #
-        with open(current_dir+'/Data/processed_'+name_flag+'.pth', 'wb') as f:
-            torch.save(
-                {'data_Website': data_Website, 'data_Duramat': data_Duramat},
-                f)
-    from training_multi_obsolete import train_save_model, init_trainer, load_model, load_post_trained_model, custom_collate_fn
+        print(label_counts)
 
-    tensor_label_list_Duramat = just_transform(data_Duramat, channels=[0])
-    tensor_label_list_Website = just_transform(data_Website, channels=channels)
+        train_data = augment_underrepresented_classes(train_data, label_counts)
 
-    from sklearn.model_selection import train_test_split
-    from torch.utils.data import DataLoader, ConcatDataset
+    # ########### WEBSITE ##########
 
-    # 1. Split each dataset separately
-    train_duramat, val_duramat = train_test_split(tensor_label_list_Duramat, test_size=0.3, random_state=42)
-    train_duramat = augment_underrepresented_classes(train_duramat)
+    path_Website = "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage"
+    
+  
+    data_loader_2 = load_data(path_Website, type='website_train')
 
-    train_website, val_website = train_test_split(tensor_label_list_Website, test_size=0.3, random_state=42)
-    train_website = augment_underrepresented_classes(train_website)
+    
+    #data_loader_2 = Load_Data_Handler(path_Website, args, classified_by=["Ebrar","Ralf"], folders_excluded=[ '23-P09-D','PVVintage']) #, '23-P09-C', '23-P09-D', '23-P09-E', 'C14-A', 'C14-C','C14-I'
+    data_Website = data_loader_2.get_data()
+    label_counts_Website = count_data_per_class_in_labels(data_loader_2.labels_as_integers)
 
-    # 2. Create PVDataset objects for each split
-    dataset_train_duramat = PVDataset(train_duramat, channels=[[0]]*len(train_duramat), scale=1, return_labels=True)
-    dataset_val_duramat   = PVDataset(val_duramat,   channels=[[0]]*len(val_duramat),   scale=1, return_labels=True)
-    dataset_train_website = PVDataset(train_website, channels=[channels]*len(train_website), scale=1, return_labels=True)
-    dataset_val_website   = PVDataset(val_website,   channels=[channels]*len(val_website),   scale=1, return_labels=True)
+    # save_images_by_label(data_Website, data_loader_2.labels_as_integers, current_dir+images_folder+'/Webpage_images_EL', flag='Website')
 
-    # 3. Concatenate for train and validation
-    concat_train = ConcatDataset([dataset_train_duramat, dataset_train_website])
-    concat_val   = ConcatDataset([dataset_val_duramat,   dataset_val_website])
+    data_Website = [(item[0], item[1][0:args.num_classes]) for item in data_Website]    # Remove data with labels above 3, from DARK and above
 
-    from load_data import AlternatingBatchSampler  # or wherever your sampler is
+    # path_Website = "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage"
+    # data_loader_2 = Load_Data_Handler(path_Website, classified_by="Ralf", folder_excluded='23-P09-D')
+    # data_Website_Ralf = data_loader_2.get_data()
+    # save_images_by_label(data_Website_Ralf, data_loader_2.labels_as_integers, current_dir+images_folder+'/Webpage_images_Ralf', flag='Website')
 
-    batch_size = args.batch_size
+    # data_Website_Ralf = [(item[0], item[1][0:args.num_classes]) for item in data_Website_Ralf]    # Remove data with labels above 3, from DARK and above
 
-    sampler_train = AlternatingBatchSampler(len(dataset_train_duramat), len(dataset_train_website), batch_size)
-    sampler_val   = AlternatingBatchSampler(len(dataset_val_duramat),   len(dataset_val_website),   batch_size)
+    # # Combine both Ebrar and Ralf lists
+    
+    # data_Website = data_Website_Ebrar + data_Website_Ralf
+    # save_images_by_label(data_Website, data_loader_2.labels_as_integers, current_dir+images_folder+'/Webpage_images_Ebrar_Ralf', flag='Website')    #
+    if args.use_only_EL:
+        channels=[0]
+    else:
+        channels=[0,1,2]
+    dataset_Website = data_just_transform(data_Website, channels=channels)
+    train_data_web, val_data_web = train_test_split(dataset_Website, test_size=0.3, random_state=42)
+    train_data_web = augment_underrepresented_classes(train_data_web, label_counts_Website)
 
 
     #################################################### ONLY TRAINING MODE DURAMAT  #########################################################
     # Model with originally pretrained weights
+    if args.one_type_of_input_only:
+        from training_multi_obsolete import train_save_model, data_just_transform, init_trainer
+        if args.retrain:
+            model = load_model(args, current_dir+input_model_folder, device, args.init_weights_name, args.num_classes)
+            trainer = init_trainer(args, model, val_data_web, current_dir+output_model_folder)
+            trainer = train_save_model(trainer, train_data_web, val_data_web, current_dir+output_model_folder+'website_'+str(len(channels))+'classes_var_newD/')
+            ploting_training_results(trainer, current_dir+output_model_folder+'website_'+str(len(channels))+'classes_var_newD/')
+        else:
+            model = load_post_trained_model(args, current_dir+output_model_folder+'website_'+str(len(channels))+'classes_var_newD/', device, 'trained_state_dict', args.num_classes)
+            model.eval()
+            trainer = init_trainer(args, model, val_data_web, current_dir+output_model_folder+'website_'+str(len(channels))+'classes_var_newD/')
 
-    if args.retrain:
-        model = load_model(args, current_dir+input_model_folder, device, args.init_weights_name, args.num_classes)
-        trainer = init_trainer(
-            args,
-            model,
-            concat_val,                  # eval_dataset
-            current_dir+output_model_folder,  # outfolder
-            sampler_train=sampler_train,      # pass your train sampler
-            sampler_val=sampler_val,          # pass your val sampler
-            concat_train=concat_train,        # pass your train dataset
-            concat_val=concat_val             # pass your val dataset
-        )        
-        trainer = train_save_model(
-            trainer,
-            concat_train,   # train_dataset (should be your ConcatDataset)
-            concat_val,     # val_dataset (should be your ConcatDataset)
-            current_dir+output_model_folder+'website_'+str(len(channels))+'classes'+name_flag+'/'
-        )
-        exit()
-        ploting_training_results(trainer, current_dir+output_model_folder+'website_'+str(len(channels))+'classes'+name_flag+'/')
     else:
-        model = load_post_trained_model(args, current_dir+output_model_folder+'website_'+str(len(channels))+'classes'+name_flag+'/', device, 'trained_state_dict', args.num_classes)
-        model.eval()
-        trainer = init_trainer(
-                args,
-                model,
-                concat_val,                  # eval_dataset
-                current_dir+output_model_folder,  # outfolder
-                sampler_train=sampler_train,      # pass your train sampler
-                sampler_val=sampler_val,          # pass your val sampler
-                concat_train=concat_train,        # pass your train dataset
-                concat_val=concat_val             # pass your val dataset
-        )    
-    # else:
-    #     from training_var import CustomTrainer, train_save_model, load_model, load_post_trained_model
-    #     if args.retrain:
-    #         model = load_model(args, current_dir+input_model_folder, device, args.init_weights_name, args.num_classes)
-    #         trainer = CustomTrainer(model, args, train_data, train_data_web, val_data, val_data_web, device,  current_dir+output_model_folder+'/multi/'+'/classes_var_newD/')
-    #         trainer.train()
-    #         trainer = train_save_model(trainer, current_dir+output_model_folder+'/multi/'+'classes_var_newD_long/')
-    #         # # ploting_training_results(trainer, current_dir+output_model_folder+'duramat_3classes_var/')
-    #     else:
-    #         model = load_post_trained_model(args, current_dir+output_model_folder+'/multi/'+'/classes_var_newD_long/', device, 'trained_state_dict', args.num_classes)
-    #         trainer = CustomTrainer(model, args, train_data, train_data_web, val_data, val_data_web, device,  current_dir+output_model_folder+'/multi/'+'/classes_var_newD_long/')
+        from training_var import CustomTrainer, train_save_model, data_just_transform, load_model, load_post_trained_model
+        if args.retrain:
+            model = load_model(args, current_dir+input_model_folder, device, args.init_weights_name, args.num_classes)
+            trainer = CustomTrainer(model, args, train_data, train_data_web, val_data, val_data_web, device,  current_dir+output_model_folder+'/multi/'+'/classes_var_newD/')
+            trainer.train()
+            trainer = train_save_model(trainer, current_dir+output_model_folder+'/multi/'+'classes_var_newD/')
+            # # ploting_training_results(trainer, current_dir+output_model_folder+'duramat_3classes_var/')
+        else:
+            model = load_post_trained_model(args, current_dir+output_model_folder+'/multi/'+'/classes_var_newD/', device, 'trained_state_dict', args.num_classes)
+            trainer = CustomTrainer(model, args, train_data, train_data_web, val_data, val_data_web, device,  current_dir+output_model_folder+'/multi/'+'/classes_var_newD/')
 
     # #################################################  PREDICTIONS #########################################################
     # predictions_Web = trainer.predict(val_data_web) 
@@ -219,50 +212,35 @@ if __name__ == '__main__':
 
     # #################################################  PREDICTIONS #########################################################
     # #################################################  PREDICTIONS #########################################################
-#     data_loader_3 = Load_Data_Handler(path_Website, args, classified_by=["Ebrar","Ralf"], this_folders_only=['23-P09-D'])
-#     data_Website_D = data_loader_3.get_data()
-#    # save_images_by_label(data_Website, data_loader_3.labels_as_integers, current_dir+images_folder+'/Webpage_images_Ebrar_test', flag='Website')
+    
+    data_loader_3 = load_data(path_Website, type='website_test')
 
-#     data_Website_D = [(item[0], item[1][0:args.num_classes]) for item in data_Website_D]    # Remove data with labels above 3, from DARK and above
+    data_Website_D = data_loader_3.get_data()
+   # save_images_by_label(data_Website, data_loader_3.labels_as_integers, current_dir+images_folder+'/Webpage_images_Ebrar_test', flag='Website')
 
-#     label_counts_Website = count_data_per_class_in_labels(data_loader_3.labels_as_integers)
-#     dataset_Website_D = just_transform(data_Website_D, channels=channels)
-#     predictions_Web = trainer.predict(dataset_Website_D) 
+    data_Website_D = [(item[0], item[1][0:args.num_classes]) for item in data_Website_D]    # Remove data with labels above 3, from DARK and above
 
-#     pred_labels = logits_to_classes(predictions_Web, initial_threshold=0.5)
-#     pred_labels = (pred_labels > 0.5).astype(int)
-#     true_labels_Web = np.array([item['labels'] for item in dataset_Website_D])
-#     confusion_matrix_per_class(pred_labels, true_labels_Web, plot=False, normalize=False)
-#     class_accuracies = {}
-#     for label in range(list(label_counts_Website.keys())[-1]+1):
-#         class_accuracies[label] = calculate_class_accuracy_one_hot(true_labels_Web, pred_labels, class_label=label)
-#         print("Class accuracies:", class_accuracies)
-#     for arg, value in vars(args).items():
-#         print(f"{arg}: {value}")
-    # ########### DURAMAT PREDICTION !!!! ##########
+    label_counts_Website = count_data_per_class_in_labels(data_loader_3.labels_as_integers)
+    dataset_Website_D = data_just_transform(data_Website_D, channels=channels)
 
-    predictions_duramat = trainer.predict(concat_val) 
+    predictions_Web = trainer.predict(dataset_Website_D) 
+    def to_numpy_if_needed(x):
+        if isinstance(x, torch.Tensor):
+            return x.detach().cpu().numpy()
+        return x
 
-    pred_labels = logits_to_classes(predictions_duramat, initial_threshold=0.5)
+    pred_Web = to_numpy_if_needed(predictions_Web) #predictions_Web[0]
+    pred_labels = logits_to_classes(pred_Web, initial_threshold=0.5)
     pred_labels = (pred_labels > 0.5).astype(int)
-    true_labels_duramat = np.array([item['labels'] for item in concat_val])
-    plot_normalized_confusion_matrix
-    confusion_matrix_per_class(pred_labels, true_labels_duramat, plot=False, normalize=False)
-    class_accuracies = {}
-    for label in range(7):
-        class_accuracies[label] = calculate_class_accuracy_one_hot(true_labels_duramat, pred_labels, class_label=label)
-        print("Class accuracies Duramat:", class_accuracies)
-    # ########### Web VALIDATION PREDICTION !!!! ##########
-    predictions_Web = trainer.predict(val_data_web) 
-
-    pred_labels = logits_to_classes(predictions_Web, initial_threshold=0.5)
-    pred_labels = (pred_labels > 0.5).astype(int)
-    true_labels_Web = np.array([item['labels'] for item in val_data_web])
+    true_labels_Web = np.array([item['labels'] for item in dataset_Website_D])
     confusion_matrix_per_class(pred_labels, true_labels_Web, plot=False, normalize=False)
     class_accuracies = {}
-    for label in range(list(label_counts.keys())[-1]+1):
+    for label in range(list(label_counts_Website.keys())[-1]+1):
         class_accuracies[label] = calculate_class_accuracy_one_hot(true_labels_Web, pred_labels, class_label=label)
         print("Class accuracies:", class_accuracies)
+    for arg, value in vars(args).items():
+        print(f"{arg}: {value}")
+    exit()
 
     # ########### INFINITY PREDICTION !!!! ##########
 

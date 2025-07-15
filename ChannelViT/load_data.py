@@ -10,12 +10,69 @@ import importlib
 from torchvision import transforms
 from utils import label_names, normalize_image
 
-
-
 from collections import defaultdict
 import os
 
-def normalize_image_0_255(files_by_folder, PATH, tech, this_folders_only=[], folders_excluded=[]):
+
+import torch
+from torchvision import transforms
+from tqdm import tqdm
+
+
+def just_transform(data, channels=[0]):
+    """
+    Preprocess all images (resize, normalize, stack channels) and save as a single .pt file.
+    """
+
+    images = [item[0] for item in data]  # Extract images
+    labels = [item[1] for item in data]  # Extract labels
+    # Define transforms
+    el_transform = transforms.Compose([
+        transforms.ToPILImage(),
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.5], std=[0.5])
+    ])
+    rgb_transform = transforms.Compose([
+        transforms.ToPILImage(),
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+    transform = transforms.Compose([
+        transforms.ToPILImage(),
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.73], std=[0.17])  # Normalize the image
+ ])
+
+    tensors = []
+    for img in tqdm(images, desc="Preprocessing images"):
+        if img.shape[-1] == 7:
+            el = img[:, :, 0]
+            vis = img[:, :, 1:4]
+            uv = img[:, :, 4:7]
+            el = el_transform(el)
+            vis = rgb_transform(vis)
+            uv = rgb_transform(uv)
+            img_chw = torch.cat([el, vis, uv], dim=0)  # (7, 224, 224)
+        else:
+            if len(channels) == 1:
+                img_chw = transform(img)
+            else:
+                img_chw = el_transform(img)
+
+        tensors.append(img_chw)
+
+    # make list out of tensors and labels
+    tensor_label_list = list(zip(tensors, labels))
+
+    # dataset_all = PVDataset(tensor_label_list, channels=channels,  scale=1, return_labels=return_labels)
+
+    return tensor_label_list
+
+
+def normalize_image_0_255(files_by_folder, PATH, tech, this_folders_only=[], folders_excluded=[], all_colors=False):
     normalized_images = []
     filtered_labels = []
     for folder, files in files_by_folder.items():
@@ -58,7 +115,7 @@ def normalize_image_0_255(files_by_folder, PATH, tech, this_folders_only=[], fol
                             axs[2].set_title('VI')
                             for ax in axs:
                                 ax.axis('off')
-                            save_folder = os.path.join('Data/images/', folder_excluded)
+                            save_folder = os.path.join('Data/images/', folder)
                             os.makedirs(save_folder, exist_ok=True)
                             file_only = os.path.basename(filename.replace('.tif', '.png'))
                             for label_idx in label_indices:
@@ -82,7 +139,8 @@ def normalize_image_0_255(files_by_folder, PATH, tech, this_folders_only=[], fol
 
                 updated_filenames  = [filename.replace('_EL_', tech) for filename, label in files]
                 mean, std, max, min = calculate_mean_std_per_folder(PATH+'/segments/', updated_filenames)
-                normalized_images.extend(load_and_normalize_images(PATH+'/segments/', updated_filenames, mean, std, max, min))
+                print(f"Mean: {mean}, Std: {std}, Max: {max}, Min: {min}")
+                normalized_images.extend(load_and_normalize_images(PATH+'/segments/', updated_filenames, mean, std, max, min, all_colors=all_colors))
                 labels = [label for _, label in files]
                 filtered_labels.extend(labels)
 
@@ -109,11 +167,11 @@ def normalize_image_0_255(files_by_folder, PATH, tech, this_folders_only=[], fol
                 labels = [l for l in labels if l is not None]
             # Step 1: Calculate mean and std for the folder
             mean, std, max, min = calculate_mean_std_per_folder(PATH+'/segments/', updated_filenames)
-            # print(f"Mean: {mean}, Std: {std}", f"Max: {max}, Min: {min}")
+            print(f"Mean: {mean}, Std: {std}", f"Max: {max}, Min: {min}")
 
             # Step 2: Load and normalize images using the calculated mean and std
-            normalized_images.extend(load_and_normalize_images(PATH+'/segments/', updated_filenames, mean, std, max, min))
-            
+            normalized_images.extend(load_and_normalize_images(PATH+'/segments/', updated_filenames, mean, std, max, min, all_colors=all_colors))
+
             filtered_labels.extend(labels)
             # print(np.min([image.min() for image in normalized_images]))
             # print(np.max([image.max() for image in normalized_images]))
@@ -145,7 +203,7 @@ def calculate_mean_std_per_folder(folder_path, image_files):
     min = np.min(pixel_values)
     return mean, std, max, min
 
-def load_and_normalize_images(folder_path, image_files, mean, std, max, min):
+def load_and_normalize_images(folder_path, image_files, mean, std, max, min, all_colors=False):
     """
     Load and normalize images from a folder using the given mean and std.
 
@@ -160,14 +218,20 @@ def load_and_normalize_images(folder_path, image_files, mean, std, max, min):
     normalized_images = []
 
     for image_file in image_files:
-        image = np.array(Image.open(folder_path+image_file).convert('L')).astype(np.float32)  # Convert to grayscale
+        if all_colors:
+            # Load the image as RGB
+            image = np.array(Image.open(folder_path+image_file).convert('RGB')).astype(np.float32)
+        else:
+            image = np.array(Image.open(folder_path+image_file).convert('L')).astype(np.float32)  # Convert to grayscale
         # Normalize the image
         # normalized_image = ((image - mean) / std) * 255.
         normalized_image = (image - min) / (max - min) * 255
         # Scale back to 0-255 range
         # normalized_image = (normalized_image - normalized_image.min()) / (normalized_image.max() - normalized_image.min()) * 255
         normalized_images.append(normalized_image.astype(np.uint8))
-
+        # Save the normalized images as PNG files
+        os.makedirs(folder_path+'/normalized/', exist_ok=True)
+        Image.fromarray(normalized_image.astype(np.uint8)).save(folder_path+'/normalized/'+os.path.basename(image_file).replace('.tif', '_normalized.png'))
     return normalized_images
 
 def separate_files_by_folder(file_paths, labels=None):
@@ -261,32 +325,35 @@ class Load_Data_Handler:
         # Separate files by their folders
         files_by_folder = separate_files_by_folder(elpaths, labels)
         if args.use_only_EL:
+
             self.images_el, self.labels = normalize_image_0_255(files_by_folder, PATH, '_EL_', this_folders_only=this_folders_only, folders_excluded=folders_excluded)
             self.images =self.images_el
         else:
-            self.images = [np.stack((el, uv, vis), axis=-1)for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
             for technology in ['_EL_', '_UV_', '_VI_']:
+                print(f"Processing technology: {technology}")
                 if technology == '_EL_':
+                    
                     self.images_el, self.labels = normalize_image_0_255(files_by_folder, PATH, technology, this_folders_only=this_folders_only, folders_excluded=folders_excluded)
+
                 elif technology == '_UV_':
-                    self.images_uv, self.labels = normalize_image_0_255(files_by_folder, PATH, technology, this_folders_only=this_folders_only, folders_excluded=folders_excluded)
+                    self.images_uv, self.labels = normalize_image_0_255(files_by_folder, PATH, technology, this_folders_only=this_folders_only, folders_excluded=folders_excluded, all_colors=args.all_colors)
                 elif technology == '_VI_':
-                    self.images_vis, self.labels = normalize_image_0_255(files_by_folder, PATH, technology, this_folders_only=this_folders_only, folders_excluded=folders_excluded)
-            # self.images_el = [np.array(Image.open(PATH+'/segments/'+path).convert('L')).astype(np.uint8) for path in elpaths]
-            # self.images_uv = [np.array(Image.open(PATH+'/segments/'+path).convert('L')).astype(np.uint8) for path in uvpaths]
-            # self.images_vis = [np.array(Image.open(PATH+'/segments/'+path).convert('L')).astype(np.uint8) for path in vispaths]
+                    self.images_vis, self.labels = normalize_image_0_255(files_by_folder, PATH, technology, this_folders_only=this_folders_only, folders_excluded=folders_excluded, all_colors=args.all_colors)
             
             # Combine the 3 lists of grayscale images into one list of RGB images
             # self.images = [np.stack((el, uv, vis), axis=-1) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
             # self.images = [np.concatenate((el, uv, vis), axis=-1) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
-            self.images = [np.stack((el, uv, vis), axis=-1)for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
+            if args.all_colors:
+                self.images = [np.concatenate((el[:,:,None], uv, vis), axis=-1) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
+            else:
+                self.images = [np.stack((el, uv, vis), axis=-1)for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
 
         self.labels_as_integers = [np.where(label == 1)[0].tolist() for label in self.labels]
         self.empty_label_indices = [i for i, label in enumerate(self.labels) if isinstance(label, np.ndarray) and np.all(label == 0)]
 
         # Remove labels at indices in self.empty_label_indices
         filtered_images = [img for i, img in enumerate(self.images) if i not in self.empty_label_indices]
-        filtered_labels = [label for i, label in enumerate(self.labels) if i not in self.empty_label_indices]
+        filtered_labels = [torch.tensor(label) for i, label in enumerate(self.labels) if i not in self.empty_label_indices]
         self.data = list(zip(filtered_images, filtered_labels))
         
 
@@ -348,39 +415,31 @@ class Load_Data_Handler_notlabeled:
 
 
 class PVDataset(torch.utils.data.Dataset):
-    def __init__(self, df, channels, transform=None, scale=1, return_labels=True):
+    def __init__(self, df, channels, scale=1, return_labels=True):
         self.df = df
         self.channels = channels
-        self.transform = transform
+
         self.scale = scale
         self.return_labels = return_labels
 
+
     def __getitem__(self, idx):
         row = self.df[idx]
-
-        img_chw = Image.fromarray(row[0])
-
-        # Apply data augmentation
-        img_chw = self.transform(img_chw)
+        img_chw = row[0]
 
         # Select the specified channels
-        if isinstance(img_chw, list):
-            img_chw = [img[self.channels, :, :] for img in img_chw]
-        else:
-            img_chw = img_chw[self.channels, :, :]
+        img_chw = img_chw[self.channels[idx], :, :]
 
-        # Scale the channels if needed
+        # Scale if needed
         if self.scale != 1:
-            if isinstance(img_chw, list):
-                img_chw = [c * self.scale for c in img_chw]
-            else:
-                img_chw *= self.scale
-        self.channels = torch.tensor([c for c in self.channels])
+            img_chw *= self.scale
+
+        self.channel = torch.tensor([c for c in self.channels[idx]])
 
         if self.return_labels:
-            return {"images": img_chw, "labels": row[1], "channels": self.channels}
+            return {"images": img_chw, "labels": row[1], "channels": self.channel}
         else:
-            return {"images": img_chw, "channels": self.channels}
+            return {"images": img_chw, "channels": self.channel}
         
     def __len__(self):
         return len(self.df)
@@ -415,3 +474,30 @@ def load_data_from_csv(csv_path):
         data.append((image, label))
 
     return data
+
+import torch
+from torch.utils.data import Sampler, ConcatDataset, DataLoader
+
+class AlternatingBatchSampler(Sampler):
+    def __init__(self, len1, len2, batch_size):
+        self.len1 = len1
+        self.len2 = len2
+        self.batch_size = batch_size
+        self.indices1 = list(range(self.len1))
+        self.indices2 = list(range(self.len2))
+        self.ptr1 = 0
+        self.ptr2 = 0
+
+    def __iter__(self):
+        ptr1, ptr2 = 0, 0
+        while ptr1 < self.len1 or ptr2 < self.len2:
+            if ptr1 < self.len1:
+                yield self.indices1[ptr1:ptr1+self.batch_size]
+                ptr1 += self.batch_size
+            if ptr2 < self.len2:
+                # Offset indices for the second dataset in ConcatDataset
+                yield [i + self.len1 for i in self.indices2[ptr2:ptr2+self.batch_size]]
+                ptr2 += self.batch_size
+
+    def __len__(self):
+        return ((self.len1 + self.batch_size - 1) // self.batch_size) + ((self.len2 + self.batch_size - 1) // self.batch_size)
