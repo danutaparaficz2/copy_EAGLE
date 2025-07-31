@@ -8,18 +8,15 @@ import sys
 import os
 import importlib
 from torchvision import transforms
-from utils import label_names, normalize_image
-
+from utils import  (count_data_per_class, convert_labels_to_one_hot, label_names, count_data_per_class_in_labels, count_data_per_multiclass)
+from plots import save_images_by_label
 from collections import defaultdict
-import os
+from torch.utils.data.dataloader import default_collate
 
-
-import torch
-from torchvision import transforms
 from tqdm import tqdm
 
 
-def just_transform(data, channels=[0]):
+def just_transform(data, channels=[0], name=''):
     """
     Preprocess all images (resize, normalize, stack channels) and save as a single .pt file.
     """
@@ -45,7 +42,12 @@ def just_transform(data, channels=[0]):
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.73], std=[0.17])  # Normalize the image
  ])
-
+    transform_inifinity = transforms.Compose([
+        transforms.ToPILImage(),
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.76], std=[0.21])  # Normalize the image
+ ])
     tensors = []
     for img in tqdm(images, desc="Preprocessing images"):
         if img.shape[-1] == 7:
@@ -58,7 +60,10 @@ def just_transform(data, channels=[0]):
             img_chw = torch.cat([el, vis, uv], dim=0)  # (7, 224, 224)
         else:
             if len(channels) == 1:
-                img_chw = transform(img)
+                if name == 'infinity':
+                    img_chw = transform_inifinity(img)
+                else:
+                    img_chw = transform(img)
             else:
                 img_chw = el_transform(img)
 
@@ -88,18 +93,27 @@ def normalize_image_0_255(files_by_folder, PATH, tech, this_folders_only=[], fol
                     else:
                         label_indices = [str(label)]
 
-                    image_path = os.path.join(PATH, 'segments', filename)
+                    image_path = os.path.join(PATH, 'bboxes', filename)
                     if tech == '_EL_':
                         try:
                             image = Image.open(image_path).convert('L')
                             # Find corresponding UV and VI images
                             uv_filename = filename.replace('_EL_', '_UV_')
                             vi_filename = filename.replace('_EL_', '_VI_')
-                            uv_path = os.path.join(PATH, 'segments', uv_filename)
-                            vi_path = os.path.join(PATH, 'segments', vi_filename)
+                            uv_path = os.path.join(PATH, 'bboxes', uv_filename)
+                            vi_path = os.path.join(PATH, 'bboxes', vi_filename)
                             try:
-                                image_uv = Image.open(uv_path).convert('L')
-                                image_vi = Image.open(vi_path).convert('L')
+                                image_uv = Image.open(uv_path)
+                                image_vi = Image.open(vi_path)
+                                image_uv_np = np.array(image_uv)
+                                image_vi_np = np.array(image_vi)
+                                if image_uv_np.max() > 255 or image_uv_np.min() < 0:
+                                    raise ValueError("UV image values should be in the range [0, 255]")
+                                if image_vi_np.max() > 255 or image_vi_np.min() < 0:
+                                    raise ValueError("VI image values should be in the range [0, 255]")
+                            except FileNotFoundError:
+                                print(f"UV or VI image not found for {filename}. Skipping this image.")
+                                continue
                             except Exception as e:
                                 print(f"Could not load UV or VI image for {filename}: {e}")
                                 continue
@@ -109,9 +123,9 @@ def normalize_image_0_255(files_by_folder, PATH, tech, this_folders_only=[], fol
                             fig, axs = plt.subplots(1, 3, figsize=(12, 4))
                             axs[0].imshow((image), cmap='gray')
                             axs[0].set_title('EL')
-                            axs[1].imshow(255-np.array(image_uv), cmap='gray')
+                            axs[1].imshow(255-np.array(image_uv))
                             axs[1].set_title('UV ')
-                            axs[2].imshow(255-np.array(image_vi), cmap='gray')
+                            axs[2].imshow(255-np.array(image_vi))
                             axs[2].set_title('VI')
                             for ax in axs:
                                 ax.axis('off')
@@ -138,9 +152,9 @@ def normalize_image_0_255(files_by_folder, PATH, tech, this_folders_only=[], fol
                 print(folder)
 
                 updated_filenames  = [filename.replace('_EL_', tech) for filename, label in files]
-                mean, std, max, min = calculate_mean_std_per_folder(PATH+'/segments/', updated_filenames)
+                mean, std, max, min = calculate_mean_std_per_folder(PATH+'/bboxes/', updated_filenames)
                 print(f"Mean: {mean}, Std: {std}, Max: {max}, Min: {min}")
-                normalized_images.extend(load_and_normalize_images(PATH+'/segments/', updated_filenames, mean, std, max, min, all_colors=all_colors))
+                normalized_images.extend(load_and_normalize_images(PATH+'/bboxes/', updated_filenames, mean, std, max, min, all_colors=all_colors))
                 labels = [label for _, label in files]
                 filtered_labels.extend(labels)
 
@@ -148,7 +162,19 @@ def normalize_image_0_255(files_by_folder, PATH, tech, this_folders_only=[], fol
             print(folder)
 
             updated_filenames = [filename.replace('_EL_', tech) for filename, label in files]
-            labels = [label for _, label in files]
+            # Remove '23_P08_G2' from updated_filenames and respective labels
+            if any('23_P08_G2' in fname for fname in updated_filenames):
+                print("'23_P08_G2' found in updated_filenames, removing it and respective labels")
+                filtered = [(fname, label) for fname, label in zip(updated_filenames, labels) if '23_P08_G2' not in fname]
+                if filtered:
+                    updated_filenames, labels = zip(*filtered)
+                    updated_filenames = list(updated_filenames)
+                    labels = list(labels)
+                else:
+                    updated_filenames, labels = [], []
+            else:
+                print("'23_P08_G2' not found in updated_filenames")
+                labels = [label for _, label in files]
             # Find indices where filenames are duplicated
             filename_indices = defaultdict(list)
             for idx, fname in enumerate(updated_filenames):
@@ -166,11 +192,11 @@ def normalize_image_0_255(files_by_folder, PATH, tech, this_folders_only=[], fol
                 updated_filenames = [f for f in updated_filenames if f is not None]
                 labels = [l for l in labels if l is not None]
             # Step 1: Calculate mean and std for the folder
-            mean, std, max, min = calculate_mean_std_per_folder(PATH+'/segments/', updated_filenames)
+            mean, std, max, min = calculate_mean_std_per_folder(PATH+'/bboxes/', updated_filenames)
             print(f"Mean: {mean}, Std: {std}", f"Max: {max}, Min: {min}")
 
             # Step 2: Load and normalize images using the calculated mean and std
-            normalized_images.extend(load_and_normalize_images(PATH+'/segments/', updated_filenames, mean, std, max, min, all_colors=all_colors))
+            normalized_images.extend(load_and_normalize_images(PATH+'/bboxes/', updated_filenames, mean, std, max, min, all_colors=all_colors))
 
             filtered_labels.extend(labels)
             # print(np.min([image.min() for image in normalized_images]))
@@ -332,9 +358,7 @@ class Load_Data_Handler:
             for technology in ['_EL_', '_UV_', '_VI_']:
                 print(f"Processing technology: {technology}")
                 if technology == '_EL_':
-                    
                     self.images_el, self.labels = normalize_image_0_255(files_by_folder, PATH, technology, this_folders_only=this_folders_only, folders_excluded=folders_excluded)
-
                 elif technology == '_UV_':
                     self.images_uv, self.labels = normalize_image_0_255(files_by_folder, PATH, technology, this_folders_only=this_folders_only, folders_excluded=folders_excluded, all_colors=args.all_colors)
                 elif technology == '_VI_':
@@ -373,7 +397,7 @@ class Load_Data_Handler_notlabeled:
     def __init__(self, PATH, subfolder):
         current_dir = os.path.dirname(os.path.abspath(__file__))
         
-        panelfolder = PATH+'/segments/'+subfolder
+        panelfolder = PATH+'/bboxes/'+subfolder
         elpaths =  [file for file in os.listdir(panelfolder) if "_EL_" in file and file.endswith(".tif")]
         uvpaths =  [file for file in os.listdir(panelfolder) if "_UV_" in file and file.endswith(".tif")]
         vispaths = [file for file in os.listdir(panelfolder) if "_VI_" in file and file.endswith(".tif")]
@@ -477,27 +501,188 @@ def load_data_from_csv(csv_path):
 
 import torch
 from torch.utils.data import Sampler, ConcatDataset, DataLoader
+import random
 
 class AlternatingBatchSampler(Sampler):
-    def __init__(self, len1, len2, batch_size):
+    def __init__(self, len1, len2, batch_size, shuffle=True):
         self.len1 = len1
         self.len2 = len2
         self.batch_size = batch_size
-        self.indices1 = list(range(self.len1))
-        self.indices2 = list(range(self.len2))
-        self.ptr1 = 0
-        self.ptr2 = 0
+        self.shuffle = shuffle
 
     def __iter__(self):
+        indices1 = list(range(self.len1))
+        indices2 = list(range(self.len2))
+        if self.shuffle:
+            random.shuffle(indices1)
+            random.shuffle(indices2)
         ptr1, ptr2 = 0, 0
         while ptr1 < self.len1 or ptr2 < self.len2:
             if ptr1 < self.len1:
-                yield self.indices1[ptr1:ptr1+self.batch_size]
+                yield indices1[ptr1:ptr1+self.batch_size]
                 ptr1 += self.batch_size
             if ptr2 < self.len2:
-                # Offset indices for the second dataset in ConcatDataset
-                yield [i + self.len1 for i in self.indices2[ptr2:ptr2+self.batch_size]]
+                yield [i + self.len1 for i in indices2[ptr2:ptr2+self.batch_size]]
                 ptr2 += self.batch_size
 
     def __len__(self):
         return ((self.len1 + self.batch_size - 1) // self.batch_size) + ((self.len2 + self.batch_size - 1) // self.batch_size)
+    
+
+def load_all_data_together(current_dir, images_folder, name_flag='rgb', args=None):
+        ######################################### Load the data ##################################################
+    ########### DURAMAT ##########
+    if os.path.exists(current_dir+'/Data/processed_'+name_flag+'.pth'):
+        with open(current_dir+'/Data/processed_'+name_flag+'.pth', 'rb') as f:
+            data = torch.load(f)
+            data_Website = data['data_Website_Ebrar']
+            data_Website_Ralf = data['data_Website_Ralf']
+            data_Duramat = data['data_Duramat']
+            data_Infinity = data['data_Infinity']
+    else:
+        path_Duramat = "/Users/eagle/FFHS/eagle-bfe - data/Duramat_no_pool_labels.pkl"
+        # directory_path = os.path.dirname(current_dir)+"/eagle-labelling/features_pickle/"
+        data_loader =  Load_Data(path_Duramat)
+        data_Duramat = data_loader.get_data()
+        label_counts_duramat = count_data_per_class(data_Duramat)
+        count_data_per_multiclass(data_Duramat)
+        labels = [item[1] for item in data_Duramat]  # Extract the labels (tensors)
+        data_Duramat = convert_labels_to_one_hot(data_Duramat, num_classes=args.num_classes)
+
+        # remove DARK class because in Duramat it means something different
+        for i, item in enumerate(data_Duramat):
+            item[1][3]=0
+            data_Duramat[i] = (item[0], item[1]) 
+
+        # integer_labels = [torch.argmax(item[1]).item() for item in data_Duramat]  # Convert one-hot encoded labels to integers
+        labels_as_integers = [np.where(label == 1)[0].tolist() for _, label in data_Duramat]
+
+        save_images_by_label(data_Duramat, labels_as_integers, current_dir+images_folder+'/Duramat_images_last/')
+
+        # ########### INFINITY ##########
+
+        path_Infinity = os.path.dirname(current_dir)+"/eagle-labelling/features_pickle/Infinity_all_no_pool_labels.pkl"
+        data_loader =  Load_Data(path_Infinity)
+        data_Infinity_int = data_loader.get_data()
+        data_loader.get_label_statistics()
+        label_counts_infinity = count_data_per_class(data_Infinity_int)
+        count_data_per_multiclass(data_Infinity_int)
+
+        data_Infinity = convert_labels_to_one_hot(data_Infinity_int, args.num_classes)
+
+        # Integer labels for saving images:
+        # integer_labels = [torch.argmax(label).item() for _, label in data_Infinity]
+        labels_as_integers = [np.where(label == 1)[0].tolist() for _, label in data_Infinity]
+        save_images_by_label(data_Infinity, labels_as_integers, current_dir+images_folder+'/Infinity_images_last/')
+
+        ########### WEBSITE EBRAR ##########
+        path_Website = "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage"
+        data_loader_2 = Load_Data_Handler(path_Website, args, classified_by=["Ebrar"]) #, '23-P09-C', '23-P09-D', '23-P09-E', 'C14-A', 'C14-C','C14-I'
+        data_Website = data_loader_2.get_data()
+        label_counts_Website = count_data_per_class_in_labels(data_loader_2.labels_as_integers)
+        print(label_counts_Website)
+
+        data_Website = [(item[0], item[1][0:args.num_classes]) for item in data_Website]   
+        # integer_labels = [torch.argmax(label).item() for _, label in data_Website]
+        labels_as_integers = [np.where(label == 1)[0].tolist() for _, label in data_Website]
+
+        save_images_by_label(data_Website, labels_as_integers, current_dir+images_folder+'/Webpage_images_Ebrar_last', flag='Website', name_flag=name_flag)    #
+
+        ########### WEBSITE RALF ##########
+        path_Website = "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage"
+        data_loader_2 = Load_Data_Handler(path_Website, args, classified_by=["Ralf"]) #, '23-P09-C', '23-P09-D', '23-P09-E', 'C14-A', 'C14-C','C14-I'
+        data_Website_Ralf = data_loader_2.get_data()
+        label_counts_Website = count_data_per_class_in_labels(data_loader_2.labels_as_integers)
+        print(label_counts_Website)
+
+        data_Website_Ralf = [(item[0], item[1][0:args.num_classes]) for item in data_Website_Ralf]   
+        # integer_labels = [torch.argmax(label).item() for _, label in data_Website_Ralf]
+        labels_as_integers = [np.where(label == 1)[0].tolist() for _, label in data_Website_Ralf]
+
+        save_images_by_label(data_Website_Ralf, labels_as_integers, current_dir+images_folder+'/Webpage_images_Ralf', flag='Website', name_flag=name_flag)    #
+        with open(current_dir+'/Data/processed_'+name_flag+'.pth', 'wb') as f:
+            torch.save(
+                {'data_Website_Ebrar': data_Website, 'data_Website_Ralf': data_Website_Ralf, 'data_Duramat': data_Duramat, 'data_Infinity': data_Infinity},
+                f)
+    return data_Website, data_Website_Ralf, data_Duramat, data_Infinity
+    
+def find_outliers(datasetdata, device, folder, trainer, threshold=5.0):
+
+    def save_outlier_images(batch, outlier_indices, i, removed_labels, out_dir="outlier_images_duramat"):
+        os.makedirs(out_dir, exist_ok=True)
+        images = batch['images']
+        labels = batch['labels']
+        # Move to CPU and convert to numpy if needed
+        if hasattr(images, 'cpu'):
+            images = images.cpu().numpy()
+        if hasattr(labels, 'cpu'):
+            labels = labels.cpu().numpy()
+        for idx in outlier_indices:
+            img = images[idx]
+            label = labels[idx]
+            labels_as_integers = np.where(label == 1)
+            print(labels_as_integers)
+            if 0 in labels_as_integers[0]:
+                print(f"Outlier image {i+idx} has label 0")
+                removed_labels.append(i+idx)
+
+
+            # If image is (C, H, W), convert to (H, W, C)
+            if img.ndim == 3 and img.shape[0] in [1, 3]:
+                img = np.transpose(img, (1, 2, 0))
+            # Rescale from mean=0, std=1 to [0,255]
+            img = np.clip((img * 64) + 127.5, 0, 255).astype(np.uint8)
+            img_pil = Image.fromarray(img.squeeze())
+            img_pil.save(os.path.join(out_dir, f"outlier_{i+idx}_label_{np.where(label==1)[0]}.png"))
+        return removed_labels
+
+    def find_outlier_samples(images, labels, batch, model, loss_fn, i, threshold=5.0):
+        model.eval()
+        images = images.to(device)
+        labels = labels.to(device)
+        # If you need extra tokens from batch, move them to device individually:
+        extra_tokens = {}
+        if isinstance(batch, dict):
+            for k, v in batch.items():
+                if hasattr(v, 'to'):
+                    extra_tokens[k] = v.to(device)
+                else:
+                    extra_tokens[k] = v
+        else:
+            extra_tokens = batch  # or handle as needed
+
+        with torch.no_grad():
+            outputs = model(images, extra_tokens=extra_tokens)
+            losses = loss_fn(outputs, labels)
+            outlier_indices = (losses > threshold).nonzero(as_tuple=True)[0].tolist()
+            if outlier_indices != []:
+                print(f"No outlier samples in batch {i}")
+                print(f"Outlier sample indices in batch: {outlier_indices}")
+
+            return outlier_indices, losses.cpu().numpy()
+    
+    # Example usage in a batch:
+    dataset_inf   = PVDataset(datasetdata,   channels=[[0]]*len(datasetdata),   scale=1, return_labels=True)
+
+    dataloader = DataLoader(
+                        dataset_inf,  # or any dataset
+                        batch_size=5,           # or your desired batch size
+                        shuffle=False            # or False, as needed
+                    )
+    loss_fn = torch.nn.BCEWithLogitsLoss(reduction='none')  # or your loss
+    i=0
+    removed_labels = []
+    model = trainer.model
+    model.eval()
+    model.to(device)
+    for batch in dataloader:
+        outlier_indices, losses = find_outlier_samples(batch['images'], batch['labels'], batch, model, loss_fn, i)
+        removed_labels = save_outlier_images(batch, outlier_indices, i, removed_labels, out_dir="outlier_images_duramat")
+        i=i+5
+    import json
+
+    removed_labels_path = os.path.join(folder, 'removed_labels_duramat.json')
+    with open(removed_labels_path, 'w') as f:
+        json.dump(removed_labels, f)
+
+    return  removed_labels

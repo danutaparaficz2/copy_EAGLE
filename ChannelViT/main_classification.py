@@ -5,34 +5,28 @@ import re
 import argparse
 PYTORCH_ENABLE_MPS_FALLBACK=1
 #### Local imports
-from load_data import Load_Data, AlternatingBatchSampler, PVDataset, Load_Data_Handler, Load_Data_Handler_notlabeled, just_transform
-from utils import  (count_data_per_class, convert_list_of_arrays_to_labels, calculate_class_accuracy_one_hot, class_label_save, 
-convert_labels_to_one_hot, label_names, augment_underrepresented_classes, logits_to_classes, plot_normalized_confusion_matrix,ploting_training_results,
-count_data_per_class_in_labels, threshold_and_max, save_images_by_label, count_data_per_multiclass, plot_samples_from_all_labels_with_acc, confusion_matrix_per_class)
-from training_var import  data_just_transform
-#from training_multi_obsolete import train_save_model, data_just_transform, init_trainer
-
+from load_data import AlternatingBatchSampler, PVDataset, find_outliers, load_all_data_together, Load_Data_Handler_notlabeled, just_transform, ConcatDataset
+from utils import  (convert_list_of_arrays_to_labels, calculate_class_accuracy_one_hot, class_label_save, label_names, 
+                    augment_underrepresented_classes, logits_to_classes, threshold_and_max)
+from plots import save_images_by_label, confusion_matrix_per_class, plot_multilabel_confusion_matrix
+from training_multi import retrain_resume_or_load_pretrained
 from sklearn.model_selection import train_test_split
-import pickle
-import pandas as pd
-from PIL import Image
-from sklearn.model_selection import cross_val_predict
-from sklearn.base import BaseEstimator
+import json
+
 
 def parse_args():
 
     parser = argparse.ArgumentParser(description="Train and evaluate the model.")
-    parser.add_argument('--num_train_epochs', type=int, default=10, help='Number of training epochs.')
-    parser.add_argument('--batch_size', type=int, default=5, help='Batch size for training and evaluation.')
-    parser.add_argument('--retrain', action='store_true', default=False, help='Flag to retrain the model.')
+    parser.add_argument('--num_train_epochs', type=int, default=2, help='Number of training epochs.')
+    parser.add_argument('--batch_size', type=int, default=16, help='Batch size for training and evaluation.')
+    parser.add_argument('--retrain', type=str, default='retrain', help='retrain, resume or nothing to predict only.')
     parser.add_argument('--use_only_EL', action='store_true', default=False, help='Use only El images')
     parser.add_argument('--all_colors', action='store_true', default=True, help='Use only RGB images')
-
     parser.add_argument('--num_classes', type=int, default=7, help='Number of classes.')     
     parser.add_argument('--learning_rate', type=float, default=1e-5, help='Learning rate for training.')     
-    parser.add_argument('--one_type_of_input_only', action='store_true', default=False, help='Flag to choose if input will be with mixed number of classes or not.')
+    # parser.add_argument('--one_type_of_input_only', action='store_true', default=False, help='Flag to choose if input will be with mixed number of classes or not.')
 
-    parser.add_argument('--init_weights_name', type=str, default='imagenet_channelvit_small_p16_with_hcs_supervised', help='Name of the initial weights file.')
+    parser.add_argument('--init_weights_name', type=str, default='cpjump_cellpaint_bf_channelvit_small_p8_with_hcs_supervised', help='Name of the initial weights file.')
    # imagenet_channelvit_small_p16_with_hcs_supervised, so2sat_channelvit_small_p8_with_hcs_hard_split_supervised
    # cpjump_cellpaint_bf_channelvit_small_p8_with_hcs_supervised, camelyon_channelvit_small_p8_with_hcs_supervised
     args = parser.parse_args()
@@ -81,142 +75,129 @@ if __name__ == '__main__':
         args.max_channels = 3 
     else:
         raise ValueError(f"Unknown init_weights_name: {args.init_weights_name}. Please set max_channels accordingly.")
-    ######################################### Load the data ##################################################
-    ########### DURAMAT ##########
-    if os.path.exists(current_dir+'/Data/processed_'+name_flag+'.pth'):
-        with open(current_dir+'/Data/processed_'+name_flag+'.pth', 'rb') as f:
-            data = torch.load(f)
-            data_Website = data['data_Website']
-            data_Duramat = data['data_Duramat']
-    else:
-        path_Duramat = "/Users/eagle/FFHS/eagle-bfe - data/Duramat_no_pool_labels.pkl"
-        directory_path = os.path.dirname(current_dir)+"/eagle-labelling/features_pickle/"
-        path_Duramat = "/Users/eagle/FFHS/eagle-bfe - data/Duramat_no_pool_labels.pkl"
-        data_loader =  Load_Data(path_Duramat)
-        data_Duramat = data_loader.get_data()
-        label_counts_duramat = count_data_per_class(data_Duramat)
-        count_data_per_multiclass(data_Duramat)
-        labels = [item[1] for item in data_Duramat]  # Extract the labels (tensors)
-        data_Duramat = convert_labels_to_one_hot(data_Duramat, num_classes=args.num_classes)
 
-        # remove DARK class because in Duramat it means something different
-        for i, item in enumerate(data_Duramat):
-            item[1][3]=0
-            data_Duramat[i] = (item[0], item[1]) 
+    ####################################     LOAD DATA          ###########################################
+    data_Website, data_Website_Ralf, data_Duramat, data_Infinity = load_all_data_together(current_dir, images_folder, name_flag=name_flag, args=args)
+    ####################################     DISPLAY IMAGES          ###########################################
 
-        # Extract the labels (tensors)
-        labels = [item[1] for item in data_Duramat] 
-        integer_labels = [torch.argmax(item[1]).item() for item in data_Duramat]  # Convert one-hot encoded labels to integers
-    
-        # save_images_by_label(data_Duramat, integer_labels, current_dir+images_folder+'/Duramat_images/')
-        # dataset_duramat = just_transform(data_Duramat, channels=[0])
-        # # plot_samples_from_all_labels(dataset_duramat,None, list(label_counts_duramat.keys()), data_name='dur', outfolder=current_dir+images_folder)
+    # integer_labels = [torch.argmax(label).item() for _, label in data_Infinity]
+    # save_images_by_label(data_Infinity, integer_labels, current_dir+images_folder+'/Infinity_test_new/')
+    # integer_labels = [torch.argmax(label).item() for _, label in data_Website]
+    # save_images_by_label(data_Website, integer_labels, current_dir+images_folder+'/Webpage_images_Ebrar_newtt'+name_flag, flag='Website', name_flag=name_flag)
 
-        # ########### WEBSITE ##########
-        path_Website = "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage"
-        data_loader_2 = Load_Data_Handler(path_Website, args, classified_by=["Ebrar","Ralf"], folders_excluded=[ 'PVVintage']) #, '23-P09-C', '23-P09-D', '23-P09-E', 'C14-A', 'C14-C','C14-I'
-        data_Website = data_loader_2.get_data()
-        label_counts_Website = count_data_per_class_in_labels(data_loader_2.labels_as_integers)
+    ####################################     REMOVE WRONGLY LABELED  DATA          ###########################################
 
-        save_images_by_label(data_Website, data_loader_2.labels_as_integers, current_dir+images_folder+'/Webpage_images_Ebrar_Ralf_'+name_flag, flag='Website')
+    removed_labels_path = os.path.join(current_dir+images_folder, 'removed_labels_inf.json')
+    with open(removed_labels_path, 'r') as f:
+        removed_inf = json.load(f)
+    removed_labels_path_new = os.path.join(current_dir+images_folder, 'removed_labels_inf_new.json')
+    with open(removed_labels_path_new, 'r') as f:
+        removed_inf_new = json.load(f)
+    removed_labels_path = os.path.join(current_dir+images_folder, 'removed_labels_dur.json')
+    with open(removed_labels_path, 'r') as f:
+        removed_dur = json.load(f)
+    removed_labels_path = os.path.join(current_dir+images_folder, 'removed_website.json')
+    with open(removed_labels_path, 'r') as f:
+        removed_website = json.load(f)
+    removed_labels_path = os.path.join(current_dir+images_folder, 'removed_website_ralf.json')
+    with open(removed_labels_path, 'r') as f:
+        removed_website_ralf = json.load(f)
+    # Filter out data_Duramat rows whose index is in removed_dur
+    data_Duramat_filtered = [item for idx, item in enumerate(data_Duramat) if idx not in removed_dur]
+    # Filter out data_Infinity rows whose index is in removed_inf
+    data_Infinity_filtered1 = [item for idx, item in enumerate(data_Infinity) if idx not in removed_inf]
+    data_Infinity_filtered = [item for idx, item in enumerate(data_Infinity_filtered1) if idx not in  removed_inf_new]
 
-        data_Website = [(item[0], item[1][0:args.num_classes]) for item in data_Website]    # Remove data with labels above 3, from DARK and above
-        # save_images_by_label(data_Website, data_loader_2.labels_as_integers, current_dir+images_folder+'/Webpage_images_Ebrar_Ralf', flag='Website')    #
-        with open(current_dir+'/Data/processed_'+name_flag+'.pth', 'wb') as f:
-            torch.save(
-                {'data_Website': data_Website, 'data_Duramat': data_Duramat},
-                f)
-    from training_multi_obsolete import train_save_model, init_trainer, load_model, load_post_trained_model, custom_collate_fn
+    # Filter out data_Website rows whose index is in removed_website
+    data_Website_filtered = [item for idx, item in enumerate(data_Website) if idx not in removed_website]
+    # Filter out data_Website_Ralf rows whose index is in removed_website_ralf
+    data_Website_Ralf_filtered = [item for idx, item in enumerate(data_Website_Ralf) if idx not in removed_website_ralf]
+    ####################################     TRANSFORM DATA          ###########################################
 
-    tensor_label_list_Duramat = just_transform(data_Duramat, channels=[0])
-    tensor_label_list_Website = just_transform(data_Website, channels=channels)
-
-    from sklearn.model_selection import train_test_split
-    from torch.utils.data import DataLoader, ConcatDataset
+    tensor_label_list_Duramat = just_transform(data_Duramat_filtered, channels=[0])
+    tensor_label_list_Infinity = just_transform(data_Infinity_filtered, channels=[0], name='infinity')
+    tensor_label_list_Website = just_transform(data_Website_filtered+data_Website_Ralf_filtered, channels=channels)
 
     # 1. Split each dataset separately
-    train_duramat, val_duramat = train_test_split(tensor_label_list_Duramat, test_size=0.3, random_state=42)
+    train_duramat, temp_duramat = train_test_split(tensor_label_list_Duramat, test_size=0.3, random_state=42)
+    train_Infinity, temp_Infinity = train_test_split(tensor_label_list_Infinity, test_size=0.5, random_state=42)
+    val_duramat, test_duramat = train_test_split(temp_duramat, test_size=0.5, random_state=42)
+    val_Infinity, test_Infinity = train_test_split(temp_Infinity, test_size=0.5, random_state=42)
+    train_website, temp_website = train_test_split(tensor_label_list_Website, test_size=0.3, random_state=42)
+    val_website, test_website = train_test_split(temp_website, test_size=0.5, random_state=42)
+
     train_duramat = augment_underrepresented_classes(train_duramat)
-
-    train_website, val_website = train_test_split(tensor_label_list_Website, test_size=0.3, random_state=42)
+    train_Infinity = augment_underrepresented_classes(train_Infinity)
     train_website = augment_underrepresented_classes(train_website)
-
     # 2. Create PVDataset objects for each split
-    dataset_train_duramat = PVDataset(train_duramat, channels=[[0]]*len(train_duramat), scale=1, return_labels=True)
-    dataset_val_duramat   = PVDataset(val_duramat,   channels=[[0]]*len(val_duramat),   scale=1, return_labels=True)
+    dataset_train_duramat = PVDataset(train_duramat+train_Infinity, channels=[[0]]*(len(train_duramat)+len(train_Infinity)), scale=1, return_labels=True)
+    dataset_val_duramat   = PVDataset(temp_duramat+temp_Infinity,   channels=[[0]]*(len(temp_duramat)+len(temp_Infinity)),   scale=1, return_labels=True)
     dataset_train_website = PVDataset(train_website, channels=[channels]*len(train_website), scale=1, return_labels=True)
-    dataset_val_website   = PVDataset(val_website,   channels=[channels]*len(val_website),   scale=1, return_labels=True)
+    dataset_val_website   = PVDataset(temp_website,   channels=[channels]*len(temp_website),   scale=1, return_labels=True)
+    
+    dataset_test_duramat  = PVDataset(test_duramat,  channels=[[0]]*len(test_duramat),  scale=1, return_labels=True)
+    dataset_test_website  = PVDataset(test_website,  channels=[channels]*len(test_website),  scale=1, return_labels=True)
 
     # 3. Concatenate for train and validation
-    concat_train = ConcatDataset([dataset_train_duramat, dataset_train_website])
-    concat_val   = ConcatDataset([dataset_val_duramat,   dataset_val_website])
 
-    from load_data import AlternatingBatchSampler  # or wherever your sampler is
+    concat_train = ConcatDataset([dataset_train_duramat,dataset_train_website])
+    concat_val   = ConcatDataset([dataset_val_duramat,dataset_val_website])
+    concat_test  = ConcatDataset([dataset_test_duramat,  dataset_test_website])
 
     batch_size = args.batch_size
 
     sampler_train = AlternatingBatchSampler(len(dataset_train_duramat), len(dataset_train_website), batch_size)
-    sampler_val   = AlternatingBatchSampler(len(dataset_val_duramat),   len(dataset_val_website),   batch_size)
+    sampler_val   = AlternatingBatchSampler(len(dataset_val_duramat),   len(dataset_val_website), batch_size)
+    sampler_test  = AlternatingBatchSampler(len(dataset_test_duramat),  len(dataset_test_website),  batch_size)
 
+    ####################################################  TRAINING MODE   #########################################################
+    trainer = retrain_resume_or_load_pretrained(args, current_dir, input_model_folder, device, output_model_folder, sampler_train=sampler_train, 
+                                      sampler_val=sampler_val, concat_train=concat_train, concat_val=concat_val, channels=channels, name_flag=name_flag)
 
-    #################################################### ONLY TRAINING MODE DURAMAT  #########################################################
-    # Model with originally pretrained weights
+    ####################################################  OUTLIER DETECTION MODE   #########################################################
+    
+    # find_outliers(tensor_label_list_Duramat, device, current_dir, trainer, threshold=5.0)
+    ####################################################  PREDICION MODE   #########################################################
 
-    if args.retrain:
-        model = load_model(args, current_dir+input_model_folder, device, args.init_weights_name, args.num_classes)
-        trainer = init_trainer(
-            args,
-            model,
-            concat_val,                  # eval_dataset
-            current_dir+output_model_folder,  # outfolder
-            sampler_train=sampler_train,      # pass your train sampler
-            sampler_val=sampler_val,          # pass your val sampler
-            concat_train=concat_train,        # pass your train dataset
-            concat_val=concat_val             # pass your val dataset
-        )        
-        trainer = train_save_model(
-            trainer,
-            concat_train,   # train_dataset (should be your ConcatDataset)
-            concat_val,     # val_dataset (should be your ConcatDataset)
-            current_dir+output_model_folder+'website_'+str(len(channels))+'classes'+name_flag+'/'
-        )
-        exit()
-        ploting_training_results(trainer, current_dir+output_model_folder+'website_'+str(len(channels))+'classes'+name_flag+'/')
-    else:
-        model = load_post_trained_model(args, current_dir+output_model_folder+'website_'+str(len(channels))+'classes'+name_flag+'/', device, 'trained_state_dict', args.num_classes)
-        model.eval()
-        trainer = init_trainer(
-                args,
-                model,
-                concat_val,                  # eval_dataset
-                current_dir+output_model_folder,  # outfolder
-                sampler_train=sampler_train,      # pass your train sampler
-                sampler_val=sampler_val,          # pass your val sampler
-                concat_train=concat_train,        # pass your train dataset
-                concat_val=concat_val             # pass your val dataset
-        )    
-    # else:
-    #     from training_var import CustomTrainer, train_save_model, load_model, load_post_trained_model
-    #     if args.retrain:
-    #         model = load_model(args, current_dir+input_model_folder, device, args.init_weights_name, args.num_classes)
-    #         trainer = CustomTrainer(model, args, train_data, train_data_web, val_data, val_data_web, device,  current_dir+output_model_folder+'/multi/'+'/classes_var_newD/')
-    #         trainer.train()
-    #         trainer = train_save_model(trainer, current_dir+output_model_folder+'/multi/'+'classes_var_newD_long/')
-    #         # # ploting_training_results(trainer, current_dir+output_model_folder+'duramat_3classes_var/')
-    #     else:
-    #         model = load_post_trained_model(args, current_dir+output_model_folder+'/multi/'+'/classes_var_newD_long/', device, 'trained_state_dict', args.num_classes)
-    #         trainer = CustomTrainer(model, args, train_data, train_data_web, val_data, val_data_web, device,  current_dir+output_model_folder+'/multi/'+'/classes_var_newD_long/')
+    predictions_dur = trainer.predict(dataset_val_duramat) 
+    pred_labels = logits_to_classes(predictions_dur, initial_threshold=0.5)
+    true_labels_dur = np.array([item['labels'] for item in dataset_val_duramat])
+    class_accuracies = {}
+    print('################# ACCURACIES VALIDATION #################')
+    for label in range(7):
+        label_name, class_accuracies[label], length = calculate_class_accuracy_one_hot(true_labels_dur, pred_labels, class_label=label)
+        print(f"Class '{label_name}': accuracy={class_accuracies[label]:.2f}, count={length}")
 
-    # #################################################  PREDICTIONS #########################################################
-    # predictions_Web = trainer.predict(val_data_web) 
-    # pred_labels = logits_to_classes(predictions_Web[0], initial_threshold=0.5)
-    # pred_labels = (pred_labels > 0.5).astype(int)
-    # true_labels_Web = np.array([item['labels'] for item in val_data_web])
-    # class_accuracies = {}
-    # for label in range(list(label_counts_Website.keys())[-1]+1):
-    #     class_accuracies[label] = calculate_class_accuracy_one_hot(true_labels_Web, pred_labels, class_label=label)
-    #     print("Class accuracies:", class_accuracies)
+    # #################################################  PREDICTIONS VALIDATION #########################################################
+    predictions_Web = trainer.predict(dataset_val_website) 
+    pred_labels = logits_to_classes(predictions_Web, initial_threshold=0.5)
+    true_labels_Web = np.array([item['labels'] for item in dataset_val_website])
+    class_accuracies = {}
+    print('################# ACCURACIES VALIDATION #################')
+    for label in range(7):
+        label_name, class_accuracies[label], length = calculate_class_accuracy_one_hot(true_labels_Web, pred_labels, class_label=label)
+        print(f"Class '{label_name}': accuracy={class_accuracies[label]:.2f}, count={length}")
 
+    # #################################################  PREDICTIONS test #########################################################
+
+    predictions_Web = trainer.predict(dataset_test_website) 
+    pred_labels = logits_to_classes(predictions_Web, initial_threshold=0.5)
+    true_labels_Web = np.array([item['labels'] for item in dataset_test_website])
+    class_accuracies = {}
+    print('################# ACCURACIES TEST #################')
+    for label in range(7):
+        label_name, class_accuracies[label], length = calculate_class_accuracy_one_hot(true_labels_Web, pred_labels, class_label=label)
+        print(f"Class '{label_name}': accuracy={class_accuracies[label]:.2f}, count={length}")
+
+    predictions_dur = trainer.predict(dataset_test_duramat) 
+    pred_labels = logits_to_classes(predictions_dur, initial_threshold=0.5)
+    true_labels_dur = np.array([item['labels'] for item in dataset_test_duramat])
+    class_accuracies = {}
+    print('################# ACCURACIES TEST #################')
+    for label in range(7):
+        label_name, class_accuracies[label], length = calculate_class_accuracy_one_hot(true_labels_dur, pred_labels, class_label=label)
+        print(f"Class '{label_name}': accuracy={class_accuracies[label]:.2f}, count={length}")
+    exit()
     # #################################################  PREDICTIONS #########################################################
     # #################################################  PREDICTIONS #########################################################
 #     data_loader_3 = Load_Data_Handler(path_Website, args, classified_by=["Ebrar","Ralf"], this_folders_only=['23-P09-D'])
@@ -241,17 +222,54 @@ if __name__ == '__main__':
 #         print(f"{arg}: {value}")
     # ########### DURAMAT PREDICTION !!!! ##########
 
-    predictions_duramat = trainer.predict(concat_val) 
+    predictions_val = trainer.predict(dataset_val_duramat) 
 
-    pred_labels = logits_to_classes(predictions_duramat, initial_threshold=0.5)
-    pred_labels = (pred_labels > 0.5).astype(int)
-    true_labels_duramat = np.array([item['labels'] for item in concat_val])
-    plot_normalized_confusion_matrix
-    confusion_matrix_per_class(pred_labels, true_labels_duramat, plot=False, normalize=False)
+    pred_labels = logits_to_classes(predictions_val, initial_threshold=0.5)
+    # pred_labels = (pred_labels > 0.5).astype(int)
+    true_labels_val = np.array([item['labels'] for item in dataset_val_duramat])
+    # labels = [item[1] for item in predictions_val.label_ids]  # Extract the labels (tensors)
+    # integer_labels = [np.where(label == 1)[0][0].item() for label in labels]
+    # plot_multilabel_confusion_matrix(true_labels_val, pred_labels, class_names=['good','crack','cross','dark','corrosion','discoloration', 'delamination'], 
+    #                                  output_path='./Data/results/confusion_matrix1.png')
+
+    # confusion_matrix_per_class(pred_labels, true_labels_val, plot=False, normalize=False)
     class_accuracies = {}
     for label in range(7):
-        class_accuracies[label] = calculate_class_accuracy_one_hot(true_labels_duramat, pred_labels, class_label=label)
+        class_accuracies[label] = calculate_class_accuracy_one_hot(true_labels_val, pred_labels, class_label=label)
         print("Class accuracies Duramat:", class_accuracies)
+
+    predictions_val = trainer.predict(dataset_test_duramat) 
+
+    pred_labels = logits_to_classes(predictions_val, initial_threshold=0.5)
+    # pred_labels = (pred_labels > 0.5).astype(int)
+    true_labels_val = np.array([item['labels'] for item in dataset_test_duramat])
+    # labels = [item[1] for item in predictions_val.label_ids]  # Extract the labels (tensors)
+    # integer_labels = [np.where(label == 1)[0][0].item() for label in labels]
+    plot_multilabel_confusion_matrix(true_labels_val, pred_labels, class_names=['good','crack','cross','dark','corrosion','discoloration', 'delamination'], 
+                                     output_path='./Data/results/confusion_matrix_test_Duramat.png')
+
+    # confusion_matrix_per_class(pred_labels, true_labels_val, plot=False, normalize=False)
+    class_accuracies = {}
+    for label in range(7):
+        class_accuracies[label] = calculate_class_accuracy_one_hot(true_labels_val, pred_labels, class_label=label)
+        print("Class accuracies Duramat:", class_accuracies)
+
+    # # ########### INFINITY PREDICTION !!!! ##########
+
+
+    # predictions_Infinity = trainer.predict(dataset_Infinity) 
+    # # accuracy_Infinity = predictions.metrics['test_accuracy']
+
+    # pred_labels = logits_to_classes(predictions_Infinity, initial_threshold=0.5)
+    # # pred_labels = (pred_labels > 0.5).astype(int)
+    # true_labels_val = np.array([item['labels'] for item in dataset_Infinity])
+    # plot_multilabel_confusion_matrix(true_labels_val, pred_labels, class_names=['good','crack','cross','dark','corrosion','discoloration', 'delamination'], 
+    #                                  output_path='./Data/results/confusion_matrix_val_Infinity.png')
+    # class_accuracies = {}
+    # for label in range(7):
+    #     class_accuracies[label] = calculate_class_accuracy_one_hot(true_labels_val, pred_labels, class_label=label)
+    #     print("Class accuracies Infinity:", class_accuracies)
+    exit()
     # ########### Web VALIDATION PREDICTION !!!! ##########
     predictions_Web = trainer.predict(val_data_web) 
 
@@ -263,26 +281,6 @@ if __name__ == '__main__':
     for label in range(list(label_counts.keys())[-1]+1):
         class_accuracies[label] = calculate_class_accuracy_one_hot(true_labels_Web, pred_labels, class_label=label)
         print("Class accuracies:", class_accuracies)
-
-    # ########### INFINITY PREDICTION !!!! ##########
-
-    path_Infinity = os.path.dirname(current_dir)+"/eagle-labelling/features_pickle/Infinity_all_no_pool_labels.pkl"
-    data_loader =  Load_Data(path_Infinity)
-    data_Infinity = data_loader.get_data()
-    data_loader.get_label_statistics()
-    data_Infinity = [item for item in data_Infinity if item[1] <= args.num_classes-1]    # Remove data with labels above 2 - dark class is defined differently in Inifinity than duramat
-
-    label_counts_infinity = count_data_per_class(data_Infinity)
-    count_data_per_multiclass(data_Infinity)
-
-    data_Infinity = convert_labels_to_one_hot(data_Infinity, len(label_counts_infinity))
-    dataset_Infinity = data_just_transform(data_Infinity, channels=[0])
-    data_loader.get_label_statistics()
-    labels = [item[1] for item in data_Infinity]  # Extract the labels (tensors)
-    integer_labels = [torch.where(label == 1)[0][0].item() for label in labels]
-    save_images_by_label(data_Infinity, integer_labels, current_dir+images_folder+'/Infinity_images_with_dark/')
-    predictions_Infinity = trainer.predict(dataset_Infinity) 
-    # accuracy_Infinity = predictions.metrics['test_accuracy']
 
 
     binary_arr = threshold_and_max(predictions_Infinity.cpu().numpy())

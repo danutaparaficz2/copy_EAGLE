@@ -15,27 +15,6 @@ from utils import compute_metrics_sigmoid, augment_underrepresented_classes
 
 
 class CustomTrainer(Trainer):
-    def __init__(self, *args, train_batch_sampler=None, eval_batch_sampler=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.train_batch_sampler = train_batch_sampler
-        self.eval_batch_sampler = eval_batch_sampler
-
-    def get_train_dataloader(self):
-        return torch.utils.data.DataLoader(
-            self.train_dataset,
-            batch_sampler=self.train_batch_sampler,
-            collate_fn=self.data_collator,
-            num_workers=4,
-        )
-
-    def get_eval_dataloader(self, eval_dataset=None):
-        eval_dataset = eval_dataset if eval_dataset is not None else self.eval_dataset
-        return torch.utils.data.DataLoader(
-            eval_dataset,
-            batch_sampler=self.eval_batch_sampler,
-            collate_fn=self.data_collator,
-            num_workers=4,
-        )
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
 
         labels = inputs['labels']
@@ -50,11 +29,10 @@ class CustomTrainer(Trainer):
         return nn.BCEWithLogitsLoss(outputs, labels)
     
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
-        device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
 
-        labels = inputs['labels'].to(device)
+        labels = inputs['labels']
         with torch.no_grad():
-            outputs = model(inputs['images'].to(device), extra_tokens={'channels':inputs['channels'].to(device)})
+            outputs = model(inputs['images'], extra_tokens=inputs)
         if prediction_loss_only:
             loss = self.compute_loss_function(outputs, labels)
             return (loss, None, None)
@@ -63,13 +41,13 @@ class CustomTrainer(Trainer):
 # we need to collate the data to be able to use multiple inputs images and labels and channels
 def custom_collate_fn(examples):
  #   images = {k: default_collate([example[k] for example in examples]) for k in examples[0] if k == 'images'}
-    
+
     images = torch.stack([example['images'].float() for example in examples])
     rest = {k: default_collate([torch.tensor(example[k]).int() for example in examples]) for k in examples[0] if k != 'images'}
     return {'images': images, **rest}
     
 
-def init_trainer(args, model, val_dataset, outfolder, sampler_train=None, sampler_val=None, concat_train=None, concat_val=None):
+def init_trainer(args, model, val_dataset, outfolder):
 
     training_args = TrainingArguments(output_dir=outfolder,
                                     per_device_train_batch_size= args.batch_size,
@@ -92,10 +70,8 @@ def init_trainer(args, model, val_dataset, outfolder, sampler_train=None, sample
         args=training_args,
         data_collator=custom_collate_fn,
         compute_metrics=compute_metrics_sigmoid,
-        train_batch_sampler=sampler_train,
-        eval_batch_sampler=sampler_val,    
-        train_dataset=concat_train,
-        eval_dataset=concat_val)
+        eval_dataset = val_dataset,
+    )
     return trainer
 
 def get_label_statistics(labels_as_integers):
@@ -106,32 +82,32 @@ def get_label_statistics(labels_as_integers):
         else:
             label_counts[label] = 1
     return label_counts
-def data_just_transform(data, channels=[0]):
+# def data_just_transform(data, channels=[0]):
 
-    transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=(0.5), std=(0.5)),
-    ])
-    dataset_all = PVDataset(data, channels=channels, transform=transform, scale=1)
-    return  dataset_all
+#     transform = transforms.Compose([
+#         transforms.Resize((224, 224)),
+#         transforms.ToTensor(),
+#         transforms.Normalize(mean=(0.5), std=(0.5)),
+#     ])
+#     dataset_all = PVDataset(data, channels=channels, transform=transform, scale=1)
+#     return  dataset_all
 
-def data_split_and_transform(data, channels=[0, 1, 2]):
-    # Split data into training and validation sets
-    train_data, val_data = train_test_split(data, test_size=0.3, random_state=42)
-    labels_as_integers = [item[1] for item in train_data]
-    label_counts = get_label_statistics(labels_as_integers)
+# def data_split_and_transform(data, channels=[0, 1, 2]):
+#     # Split data into training and validation sets
+#     train_data, val_data = train_test_split(data, test_size=0.3, random_state=42)
+#     labels_as_integers = [item[1] for item in train_data]
+#     label_counts = get_label_statistics(labels_as_integers)
 
-   # train_data = augment_underrepresented_classes(train_data, label_counts)
+#    # train_data = augment_underrepresented_classes(train_data, label_counts)
 
-    transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
-    ])
-    train_dataset = PVDataset(train_data, channels=channels, transform=transform, scale=1)
-    val_dataset = PVDataset(val_data, channels=channels, transform=transform, scale=1)
-    return train_dataset, val_dataset, transform
+#     transform = transforms.Compose([
+#         transforms.Resize((224, 224)),
+#         transforms.ToTensor(),
+#         transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
+#     ])
+#     train_dataset = PVDataset(train_data, channels=channels, transform=transform, scale=1)
+#     val_dataset = PVDataset(val_data, channels=channels, transform=transform, scale=1)
+#     return train_dataset, val_dataset, transform
 
 def train_save_model(trainer, train_dataset, val_dataset, outfolder):
 
@@ -163,7 +139,8 @@ def load_model(args, folder, device, weights_path, num_classes):
 
   # Load the model
 def load_post_trained_model(args, folder, device, weights_path, num_classes):
-    model = hcs_channelvit_small(patch_size= args.patch_size, in_chans=args.max_channels)
+    model = hcs_channelvit_small(patch_size= args.patch_size, in_chans=args.in_chans)
+    # num_classes = 4  # Replace with the actual number of classes in your dataset
     model.head = nn.Linear(model.norm.normalized_shape[0], num_classes)
     model.load_state_dict(torch.load(folder+weights_path+'.pth', map_location=device))
 
