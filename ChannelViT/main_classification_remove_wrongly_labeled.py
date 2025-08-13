@@ -8,18 +8,19 @@ PYTORCH_ENABLE_MPS_FALLBACK=1
 from load_data import AlternatingBatchSampler, PVDataset, find_outliers, load_all_data_together, Load_Data_Handler_notlabeled, just_transform, ConcatDataset
 from utils import  (convert_list_of_arrays_to_labels, calculate_class_accuracy_one_hot, class_label_save, label_names, 
                     augment_underrepresented_classes, logits_to_classes, threshold_and_max)
-from plots import save_images_by_label, confusion_matrix_per_class, plot_multilabel_confusion_matrix, plot_samples_from_all_labels_with_acc, ploting_training_results
-from training_multi import retrain_resume_or_load_pretrained
+from plots import save_images_by_label, confusion_matrix_per_class, plot_multilabel_confusion_matrix, plot_samples_from_all_labels_with_acc
+from training_multi import retrain_resume_or_load_pretrained, find_wrongly_labeled_images
 from sklearn.model_selection import train_test_split
 import json
+import pickle
 
 
 def parse_args():
 
     parser = argparse.ArgumentParser(description="Train and evaluate the model.")
-    parser.add_argument('--num_train_epochs', type=int, default=12, help='Number of training epochs.')
+    parser.add_argument('--num_train_epochs', type=int, default=5, help='Number of training epochs.')
     parser.add_argument('--batch_size', type=int, default=5, help='Batch size for training and evaluation.')
-    parser.add_argument('--retrain', type=str, default='', help='retrain, resume or nothing to predict only.')
+    parser.add_argument('--retrain', type=str, default='retrain', help='retrain, resume or nothing to predict only.')
     parser.add_argument('--use_only_EL', action='store_true', default=False, help='Use only El images')
     parser.add_argument('--all_colors', action='store_true', default=True, help='Use only RGB images')
     parser.add_argument('--num_classes', type=int, default=7, help='Number of classes.')     
@@ -54,7 +55,6 @@ if __name__ == '__main__':
     output_model_folder = '/Data/models/model_with_'+args.init_weights_name+'/epochs_'+str(args.num_train_epochs)+'/'
     input_model_folder = '/Data/models/'
     images_folder = '/Data/images/'
-    path_Website = "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage"
     if args.all_colors:
         name_flag = 'rgb'
     else:
@@ -78,165 +78,186 @@ if __name__ == '__main__':
         raise ValueError(f"Unknown init_weights_name: {args.init_weights_name}. Please set max_channels accordingly.")
 
     ####################################     LOAD DATA          ###########################################
-
-    import pickle
-    filtered_data_path = os.path.join(current_dir + images_folder, "filtered_data.pkl")
-
-    # read pickled data
-    if os.path.exists(filtered_data_path):
-        with open(filtered_data_path, "rb") as f:
-            filtered_data = pickle.load(f)
-        print(f"Filtered data loaded from {filtered_data_path}")
-    else:
-        print(f"Filtered data not found at {filtered_data_path}, creating new file.")
-
-    ################################### NORMALIZE DATA ##################################################
-    tensor_label_list_Duramat = just_transform(filtered_data['data_Duramat_filtered_more'], channels=[0])
-    tensor_label_list_Infinity = just_transform(filtered_data['data_Infinity_filtered_more'], channels=[0], name='infinity')
-    tensor_label_list_Website = just_transform(filtered_data['data_Website_filtered']+filtered_data['data_Website_Ralf_filtered'], channels=channels)
-
-    cleaned_1channel_data = tensor_label_list_Duramat + tensor_label_list_Infinity
-    cleaned_7channel_data = tensor_label_list_Website
-
-
+    data_Website, data_Website_Ralf, data_Duramat, data_Infinity = load_all_data_together(current_dir, images_folder, name_flag=name_flag, args=args)
     ####################################     DISPLAY IMAGES          ###########################################
 
-    # integer_labels = [torch.argmax(label).item() for _, label in cleaned_1channel_data]
-    # save_images_by_label(cleaned_1channel_data, integer_labels, current_dir+images_folder+'/data_1channel/',  name_flag=name_flag)
-    # integer_labels = [torch.argmax(label).item() for _, label in cleaned_7channel_data]
-    # save_images_by_label(cleaned_7channel_data, integer_labels, current_dir+images_folder+'/data_7channel/',  name_flag=name_flag)
-    # print("Images saved in folders:", current_dir+images_folder+'/data_1channel/', current_dir+images_folder+'/data_7channel/')
-    ####################################     TRANSFORM DATA          ###########################################
+    # integer_labels = [torch.argmax(label).item() for _, label in data_Infinity]
+    # save_images_by_label(data_Infinity, integer_labels, current_dir+images_folder+'/Infinity_test_new/')
+    # integer_labels = [torch.argmax(label).item() for _, label in data_Website]
+    # save_images_by_label(data_Website, integer_labels, current_dir+images_folder+'/Webpage_images_Ebrar_newtt'+name_flag, flag='Website', name_flag=name_flag)
 
+    ####################################     REMOVE WRONGLY LABELED  DATA          ###########################################
+
+    removed_labels_path = os.path.join(current_dir+images_folder+'/REMOVED_WRONGLY_LABELED_DATA/', 'removed_labels_inf.json')
+    with open(removed_labels_path, 'r') as f:
+        removed_inf = json.load(f)
+    removed_labels_path_new = os.path.join(current_dir+images_folder+'/REMOVED_WRONGLY_LABELED_DATA/', 'removed_labels_inf_new.json')
+    with open(removed_labels_path_new, 'r') as f:
+        removed_inf_new = json.load(f)
+    removed_labels_path = os.path.join(current_dir+images_folder+'/REMOVED_WRONGLY_LABELED_DATA/', 'removed_labels_dur.json')
+    with open(removed_labels_path, 'r') as f:
+        removed_dur = json.load(f)
+    removed_labels_path = os.path.join(current_dir+images_folder+'/REMOVED_WRONGLY_LABELED_DATA/', 'removed_website.json')
+    with open(removed_labels_path, 'r') as f:
+        removed_website = json.load(f)
+    removed_labels_path = os.path.join(current_dir+images_folder+'/REMOVED_WRONGLY_LABELED_DATA/', 'removed_website_ralf.json')
+    with open(removed_labels_path, 'r') as f:
+        removed_website_ralf = json.load(f)
+    # Filter out data_Duramat rows whose index is in removed_dur
+    data_Duramat_filtered = [item for idx, item in enumerate(data_Duramat) if idx not in removed_dur]
+    # Filter out data_Infinity rows whose index is in removed_inf
+    data_Infinity_filtered1 = [item for idx, item in enumerate(data_Infinity) if idx not in removed_inf]
+    data_Infinity_filtered = [item for idx, item in enumerate(data_Infinity_filtered1) if idx not in  removed_inf_new]
+
+
+    data_Duramat_removed = [item for idx, item in enumerate(data_Duramat) if idx  in removed_dur]
+    integer_labels = [torch.argmax(label).item() for _, label in data_Duramat_removed]
+    save_images_by_label(data_Duramat_removed, integer_labels, current_dir+images_folder+'/REMOVED_WRONGLY_LABELED_DATA/'+'/data_Duramat_removed/',  name_flag=name_flag, original_indices=removed_dur)
+    data_Infinity_removed = [item for idx, item in enumerate(data_Infinity) if idx  in removed_inf]
+    integer_labels = [torch.argmax(label).item() for _, label in data_Infinity_removed]
+    save_images_by_label(data_Infinity_removed, integer_labels, current_dir+images_folder+'/REMOVED_WRONGLY_LABELED_DATA/'+'/data_Infinity_removed/',  name_flag=name_flag, original_indices=removed_inf)
+
+
+
+    # Filter out data_Website rows whose index is in removed_website
+    data_Website_filtered = [item for idx, item in enumerate(data_Website) if idx not in removed_website]
+    # Filter out data_Website_Ralf rows whose index is in removed_website_ralf
+    data_Website_Ralf_filtered = [item for idx, item in enumerate(data_Website_Ralf) if idx not in removed_website_ralf]
+
+    data_Website_removed = [item for idx, item in enumerate(data_Website) if idx  in removed_website]
+    data_Website_Ralf_removed = [item for idx, item in enumerate(data_Website_Ralf) if idx  in removed_website_ralf]
+    data_Web_removed = data_Website_removed+data_Website_Ralf_removed
+
+
+    integer_labels = [torch.argmax(label).item() for _, label in data_Website_removed]
+    save_images_by_label(data_Website_removed, integer_labels, current_dir+images_folder+'/REMOVED_WRONGLY_LABELED_DATA/'+'/data_Website_removed/',  name_flag=name_flag, original_indices=removed_website)
+    integer_labels = [torch.argmax(label).item() for _, label in data_Website_Ralf_removed]
+    save_images_by_label(data_Website_Ralf_removed, integer_labels, current_dir+images_folder+'/REMOVED_WRONGLY_LABELED_DATA/'+'/data_Website_Ralf_removed/',  name_flag=name_flag, original_indices=removed_website_ralf)
+
+####################################     REMOVE WRONGLY LABELED  DATA   MODEL BASED       ###########################################
+    removed_labels_path = os.path.join(current_dir+images_folder+'/REMOVED_WRONGLY_LABELED_DATA/'+'wrongly_labeled_Duramat', 'wrong_indices.json')
+    with open(removed_labels_path, 'r') as f:
+        removed_Duramat = json.load(f)
+    # Filter out data_Duramat rows whose index is in removed_dur
+    data_Duramat_filtered_more = [item for idx, item in enumerate(data_Duramat_filtered) if idx not in removed_Duramat]
+
+    removed_labels_path = os.path.join(current_dir+images_folder+'/REMOVED_WRONGLY_LABELED_DATA/'+'wrongly_labeled_Infinity', 'wrong_indices.json')
+    with open(removed_labels_path, 'r') as f:
+        removed_Infinity = json.load(f)
+    # Filter out data_Infinity rows whose index is in removed_Infinity
+    data_Infinity_filtered_more = [item for idx, item in enumerate(data_Infinity_filtered) if idx not in removed_Infinity]
+
+    data_Duramat_removed = [item for idx, item in enumerate(data_Duramat_filtered) if idx  in removed_Duramat]
+    integer_labels = [torch.argmax(label).item() for _, label in data_Duramat_removed]
+    save_images_by_label(data_Duramat_removed, integer_labels, current_dir+images_folder+'/REMOVED_WRONGLY_LABELED_DATA/'+'/data_Duramat_removed_model/',  name_flag=name_flag, original_indices=removed_Duramat)
+
+    data_Infinity_removed = [item for idx, item in enumerate(data_Infinity_filtered) if idx  in removed_Infinity]
+    integer_labels = [torch.argmax(label).item() for _, label in data_Infinity_removed]
+    save_images_by_label(data_Infinity_removed, integer_labels, current_dir+images_folder+'/REMOVED_WRONGLY_LABELED_DATA/'+'/data_Infinity_removed_model/',  name_flag=name_flag, original_indices=removed_Infinity)
+
+    ####################################     DISPLAY IMAGES          ###########################################
+    # data_Web = data_Website_filtered+data_Website_Ralf_filtered
+    # integer_labels = [torch.argmax(label).item() for _, label in data_Web]
+    # save_images_by_label(data_Web, integer_labels, current_dir+images_folder+'/data_Web/',  name_flag=name_flag)
+
+    ####################################     TRANSFORM DATA          ###########################################
+    # Save filtered datasets to file for reproducibility/debugging
+
+    filtered_data = {
+        "data_Duramat_filtered_more": data_Duramat_filtered_more,
+        "data_Infinity_filtered_more": data_Infinity_filtered_more,
+        "data_Website_filtered": data_Website_filtered,
+        "data_Website_Ralf_filtered": data_Website_Ralf_filtered,
+    }
+
+    filtered_data_path = os.path.join(current_dir + images_folder, "filtered_data.pkl")
+
+    with open(filtered_data_path, "wb") as f:
+        pickle.dump(filtered_data, f)
+    print("Filtered data saved to", filtered_data_path)
+    
+    tensor_label_list_Duramat = just_transform(data_Duramat_filtered_more, channels=[0])
+    tensor_label_list_Infinity = just_transform(data_Infinity_filtered_more, channels=[0], name='infinity')
+    tensor_label_list_Website = just_transform(data_Website_filtered+data_Website_Ralf_filtered, channels=channels)
+
+
+    ####################################     MAKE TRAIN TEST DATASET       ###########################################
 
     # 1. Split each dataset separately
-    train_cleaned_1channel_data, temp_cleaned_1channel_data = train_test_split(cleaned_1channel_data, test_size=0.2, random_state=42)
-    train_cleaned_7channel_data, temp_cleaned_7channel_data = train_test_split(cleaned_7channel_data, test_size=0.3, random_state=42)
+    train_raw_duramat, temp_duramat = train_test_split(tensor_label_list_Duramat, test_size=0.2, random_state=42)
+    train_raw_Infinity, temp_Infinity = train_test_split(tensor_label_list_Infinity, test_size=0.2, random_state=42)
+    val_duramat, test_duramat = train_test_split(temp_duramat, test_size=0.5, random_state=42)
+    val_Infinity, test_Infinity = train_test_split(temp_Infinity, test_size=0.5, random_state=42)
+    train_raw_website, temp_website = train_test_split(tensor_label_list_Website, test_size=0.2, random_state=42)
+    val_website, test_website = train_test_split(temp_website, test_size=0.5, random_state=42)
 
-    train_cleaned_1channel_data = augment_underrepresented_classes(train_cleaned_1channel_data)
-    train_cleaned_7channel_data = augment_underrepresented_classes(train_cleaned_7channel_data)
+    train_duramat = augment_underrepresented_classes(train_raw_duramat)
+    train_Infinity = augment_underrepresented_classes(train_raw_Infinity)
+    dataset_train_duramat = PVDataset(train_duramat+train_Infinity, channels=[[0]]*(len(train_duramat)+len(train_Infinity)), scale=1, return_labels=True)
+    dataset_val_duramat   = PVDataset(temp_duramat+temp_Infinity,   channels=[[0]]*(len(temp_duramat)+len(temp_Infinity)),   scale=1, return_labels=True)
 
-    # 2. Create PVDataset objects for each split
-    dataset_train_cleaned_1channel_data = PVDataset(train_cleaned_1channel_data, channels=[[0]]*(len(train_cleaned_1channel_data)+len(train_cleaned_7channel_data)), scale=1, return_labels=True)
-    dataset_temp_cleaned_1channel_data   = PVDataset(temp_cleaned_1channel_data, channels=[[0]]*(len(temp_cleaned_1channel_data)+len(temp_cleaned_7channel_data)), scale=1, return_labels=True)
-    dataset_train_cleaned_7channel_data = PVDataset(train_cleaned_7channel_data, channels=[channels]*len(train_cleaned_7channel_data), scale=1, return_labels=True)
-    dataset_temp_cleaned_7channel_data   = PVDataset(temp_cleaned_7channel_data, channels=[channels]*len(temp_cleaned_7channel_data),   scale=1, return_labels=True)
+    train_website = augment_underrepresented_classes(train_raw_website)
+    dataset_train_website = PVDataset(train_website, channels=[channels]*len(train_website), scale=1, return_labels=True)
+    dataset_val_website   = PVDataset(temp_website,   channels=[channels]*len(temp_website),   scale=1, return_labels=True)
+    
 
     batch_size = args.batch_size
 
     ########################################### TWO STAGE TRAINING ######################################################
-    # concat_train = [ConcatDataset([dataset_train_cleaned_1channel_data]), ConcatDataset([dataset_train_cleaned_7channel_data])]
-    # concat_val   = [ConcatDataset([dataset_temp_cleaned_1channel_data]), ConcatDataset([dataset_temp_cleaned_7channel_data])]
+    concat_train = [ConcatDataset([dataset_train_duramat]), ConcatDataset([dataset_train_website])]
+    concat_val   = [ConcatDataset([dataset_val_duramat]), ConcatDataset([dataset_val_website])]
 
-    # sampler_train = [AlternatingBatchSampler(len(dataset_train_cleaned_1channel_data), 0, batch_size), AlternatingBatchSampler(len(dataset_train_cleaned_7channel_data), 0, batch_size)]
-    # sampler_val   = [AlternatingBatchSampler(len(dataset_temp_cleaned_1channel_data), 0, batch_size),   AlternatingBatchSampler(len(dataset_temp_cleaned_7channel_data), 0, batch_size)]
-    # if isinstance(concat_train, list):
-    #     print("concat_train is a list")
+    sampler_train = [AlternatingBatchSampler(len(dataset_train_duramat), 0, batch_size), AlternatingBatchSampler(len(dataset_train_website), 0, batch_size)]
+    sampler_val   = [AlternatingBatchSampler(len(dataset_val_duramat), 0, batch_size),   AlternatingBatchSampler(len(dataset_val_website), 0, batch_size)]
+
+    if isinstance(concat_train, list):
+        print("concat_train is a list")
+
+    ########################################### ONE STAGE TRAINING ######################################################
+    # # 3. Concatenate for train and validation
+    # concat_train = ConcatDataset([dataset_train_duramat, dataset_train_website])
+    # concat_val   = ConcatDataset([dataset_val_duramat, dataset_val_website])
+    # concat_test  = ConcatDataset([dataset_test_duramat,  dataset_test_website])
+
+    # sampler_train = AlternatingBatchSampler(len(dataset_train_duramat), len(dataset_train_website), batch_size)
+    # sampler_val   = AlternatingBatchSampler(len(dataset_val_duramat),   len(dataset_val_website), batch_size)
+    # sampler_test  = AlternatingBatchSampler(len(dataset_test_duramat),  len(dataset_test_website),  batch_size)
 
     ####################################################  TRAINING MODE   #########################################################
-    from training_multi_one_input_type import retrain_resume_or_load_pretrained, load_post_trained_model, train_save_model, init_trainer
-    trainer = retrain_resume_or_load_pretrained(args, current_dir, input_model_folder, device, output_model_folder, concat_train=dataset_train_cleaned_1channel_data, 
-                                                         concat_val=dataset_temp_cleaned_1channel_data, channels=channels, name_flag=name_flag+'Duramat')
+
+    trainer = retrain_resume_or_load_pretrained(args, current_dir, input_model_folder, device, output_model_folder, sampler_train=sampler_train, 
+                                      sampler_val=sampler_val, concat_train=concat_train, concat_val=concat_val, channels=channels, name_flag=name_flag+'Duramat')
+
+    dataset_7channel_Website = PVDataset(tensor_label_list_Website, channels=[[0,1,2,3,4,5,6]]*(len(tensor_label_list_Website)), scale=1, return_labels=True)
+    # dataset_1channel_Infinity = PVDataset(tensor_label_list_Infinity, channels=[[0]]*(len(tensor_label_list_Infinity)), scale=1, return_labels=True)
+
+    find_wrongly_labeled_images(
+        trainer, 
+        dataset_7channel_Website, 
+        threshold=0.8,  # Adjust threshold as needed
+        save_dir=current_dir + images_folder + "wrongly_labeled_Website/"
+    )
+
+    ####################################################  OUTLIER DETECTION MODE   #########################################################
     
-    # ploting_training_results(trainer, current_dir+output_model_folder, last_checkpoint='', accuracies=[])
-
-    model = load_post_trained_model(args, current_dir+output_model_folder, device, 'trained_state_dict', args.num_classes)
-    # Initialize the trainer for the second stage
-    args.num_train_epochs = 2
-    trainer_7channel = init_trainer(args, model, dataset_temp_cleaned_7channel_data, current_dir + output_model_folder)
-
-    # Train the model with the 7-channel data
-    trainer_7channel = train_save_model(
-        trainer_7channel,
-        dataset_train_cleaned_7channel_data,
-        dataset_temp_cleaned_7channel_data,
-        current_dir + output_model_folder + 'all_7channels_finetuned/'
-)
-    ploting_training_results(trainer_7channel, current_dir+output_model_folder+ 'all_7channels_finetuned/', last_checkpoint='', accuracies=[])
+    # find_outliers(tensor_label_list_Duramat, device, current_dir, trainer, threshold=5.0)
     ####################################################  PREDICION MODE   #########################################################
 
-    predictions = trainer_7channel.predict(dataset_temp_cleaned_7channel_data) 
+    predictions = trainer.predict(dataset_val_website) 
     pred_labels = logits_to_classes(predictions, initial_threshold=0.5)
     predlabels = convert_list_of_arrays_to_labels(pred_labels)
 
-    true_labels = np.array([item['labels'] for item in dataset_temp_cleaned_7channel_data])
+    true_labels_Web = np.array([item['labels'] for item in dataset_val_website])
     class_accuracies = {}
     print('################# ACCURACIES VALIDATION #################')
     for label in range(7):
-        label_name, class_accuracies[label], length = calculate_class_accuracy_one_hot(true_labels, pred_labels, class_label=label)
+        label_name, class_accuracies[label], length = calculate_class_accuracy_one_hot(true_labels_Web, pred_labels, class_label=label)
         print(f"Class '{label_name}': accuracy={class_accuracies[label]:.2f}, count={length}")
 
-    # plot_samples_from_all_labels_with_acc(dataset_temp_cleaned_7channel_data, predlabels, class_accuracies, data_name='Website', 
-                                        #   outputfolder=current_dir+images_folder)
-
-    # #################################################  Label more data #########################################################
-    data_loader_2  = Load_Data_Handler_notlabeled(path_Website, 'Infinity')
-    data_Infinity_notlabeled, _ = data_loader_2.get_data()
-    data_Infinity_notlabeled_small = just_transform(data_Infinity_notlabeled, channels=channels)
-
-    with open(current_dir+'/Data/processed_notlabeled_'+name_flag+'.pth', 'wb') as f:
-        torch.save(
-            {'data_Infinity_notlabeled': data_Infinity_notlabeled},
-            f)
-
-    dataset_Infinity_notlabeled   = PVDataset(data_Infinity_notlabeled, channels=[channels]*len(data_Infinity_notlabeled),   scale=1, return_labels=False)
-
-    predictions = trainer_7channel.predict(dataset_temp_cleaned_7channel_data) 
-    integer_labels = [torch.argmax(label).item() for _, label in predictions]
-
-    save_images_by_label(data_Infinity_notlabeled, integer_labels, current_dir+images_folder+'/data_Infinity_notlabeled/',  name_flag=name_flag)
-
-    #################### TRAIN ON ONLY 1CHANNEL WEBSITE DATA #########################################################
-    # Modify dataset_temp_cleaned_7channel_data to use only the first channel for each sample
-    Web_1channel = [(img[0:1], lbl) for img, lbl in temp_cleaned_7channel_data]
-    Web_1channel_limit = [(img[0:1], lbl.float()) for img, lbl in Web_1channel if torch.sum(lbl[4:]) == 0]
-    dataset_Web_1channel   = PVDataset(Web_1channel_limit, channels=[[0]]*len(Web_1channel_limit),   scale=1, return_labels=True)
-
-    # Modify dataset_temp_cleaned_7channel_data to use only the first channel for each sample
-    Web_1channel_train = [(img[0:1], lbl) for img, lbl in train_cleaned_7channel_data]
-    Web_1channel_train_limit = [(img[0:1], lbl.float()) for img, lbl in Web_1channel_train if torch.sum(lbl[4:]) == 0]
-    dataset_Web_train_1channel   = PVDataset(Web_1channel_train_limit, channels=[[0]]*len(Web_1channel_train_limit),   scale=1, return_labels=True)
-   
-    model = load_post_trained_model(args, current_dir+output_model_folder, device, 'trained_state_dict', args.num_classes)
-    # Initialize the trainer for the second stage
-
-    trainer_1channel = init_trainer(args, model, dataset_Web_1channel, current_dir + output_model_folder)
-
-    # Train the model with the 7-channel data
-    trainer_1channel = train_save_model(
-        trainer_1channel,
-        dataset_Web_train_1channel,
-        dataset_Web_1channel,
-        current_dir + output_model_folder + 'all_1channels_finetuned/')
-    ploting_training_results(trainer_1channel, current_dir+output_model_folder+ 'all_1channels_finetuned/', last_checkpoint='', accuracies=[])
-
-    #################################  OUTLIER DETECTION MODE   #########################################################
-    
-    # find_outliers(tensor_label_list_Duramat, device, current_dir, trainer, threshold=5.0)
-
-    
-
-    # #################################################  PREDICTIONS VALIDATION #########################################################
-    predictions = trainer_1channel.predict(dataset_Web_1channel) 
-    pred_labels = logits_to_classes(predictions, initial_threshold=0.5)
-    predlabels = convert_list_of_arrays_to_labels(pred_labels)
-
-
-
-    plot_samples_from_all_labels_with_acc(dataset_temp_cleaned_7channel_data, predlabels, class_accuracies, data_name='Website', 
+    plot_samples_from_all_labels_with_acc(dataset_val_website, predlabels, class_accuracies, data_name='Website', 
                                           outfolder=current_dir+images_folder)
-    # #################################################  PREDICTIONS VALIDATION #########################################################
-    # predictions = trainer.predict(dataset_temp_cleaned_1channel_data) 
-    # pred_labels = logits_to_classes(predictions, initial_threshold=0.5)
-    # true_labels = np.array([item['labels'] for item in dataset_temp_cleaned_1channel_data])
-    # class_accuracies = {}
-    # print('################# ACCURACIES VALIDATION #################')
-    # for label in range(7):
-    #     label_name, class_accuracies[label], length = calculate_class_accuracy_one_hot(true_labels, pred_labels, class_label=label)
-    #     print(f"Class '{label_name}': accuracy={class_accuracies[label]:.2f}, count={length}")
+   #############################################  PREDICTIONS test #########################################################
     exit()
-    # #################################################  PREDICTIONS test #########################################################
-
     predictions_Web = trainer.predict(dataset_test_website) 
     pred_labels = logits_to_classes(predictions_Web, initial_threshold=0.5)
     true_labels_Web = np.array([item['labels'] for item in dataset_test_website])

@@ -1,5 +1,6 @@
 import os
 import json
+import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -10,7 +11,7 @@ from utils import label_names, normalize_image, find_optimal_grid, select_images
 
 
 
-def save_images_by_label(images, labelss, output_dir, flag='', name_flag=''):
+def save_images_by_label(images, labelss, output_dir, flag='', name_flag='', original_indices=None):
     """
     Save images into separate folders based on their labels, enhancing contrast for better visibility.
 
@@ -19,6 +20,8 @@ def save_images_by_label(images, labelss, output_dir, flag='', name_flag=''):
         labels (list): List of labels corresponding to the images.
         output_dir (str): Path to the output directory where folders will be created.
     """
+    if original_indices is None:
+        original_indices = range(len(images))
     # Ensure the output directory exists
     os.makedirs(output_dir, exist_ok=True)
 
@@ -93,7 +96,7 @@ def save_images_by_label(images, labelss, output_dir, flag='', name_flag=''):
                     combined_image.paste(blue_image, (red_image.width * 2, 0))
 
                     # Save the combined image (original size)
-                    combined_image.save(os.path.join(label_folder, f'image_{i}_rbg_channels.png'))      
+                    combined_image.save(os.path.join(label_folder, f'image_{i}_rbg_channels'+str(original_indices[i])+'.png'))      
 
                     # # Also save a resized version (224x224)
                     # combined_image_224 = combined_image.resize((672, 224))
@@ -105,7 +108,7 @@ def save_images_by_label(images, labelss, output_dir, flag='', name_flag=''):
                 norm_image = (imag - np.min(imag)) / (np.max(imag) - np.min(imag) + 1e-8) * 255
                 norm_image = norm_image.astype(np.uint8)
                 image_pil = Image.fromarray(norm_image)
-                image_pil.save(os.path.join(label_folder, f'image_{i}.png'))
+                image_pil.save(os.path.join(label_folder, f'image_{i}'+str(original_indices[i])+'.png'))
                 # image_224.save(os.path.join(label_folder, f'image_{i}_224.png'))
 
 
@@ -229,26 +232,90 @@ def plot_samples_from_all_labels_with_acc(ds_val, predlabels, class_accuracies, 
             plot_samples_from_specific_label_with_acc(selected_images, selected_predlabels, label, class_accuracies, True, data_name, outfolder)
             plot_samples_from_specific_label_with_acc(selected_images, selected_predlabels, label, class_accuracies, False, data_name, outfolder)
 
+def find_agreement_indices(true_labels, predlabels):
+    """
+    Find indices where predictions agree/disagree with true labels
+    
+    Args:
+        true_labels: List of one-hot encoded tensors
+        predlabels: List of lists with predicted label indices
+    
+    Returns:
+        matching_indices: List of indices where predictions match
+        non_matching_indices: List of indices where predictions don't match
+    """
+    matching_indices = []
+    non_matching_indices = []
+    
+    for i, (true_tensor, pred) in enumerate(zip(true_labels, predlabels)):
+        # Convert one-hot tensor to list of indices where value is 1
+        true_indices = torch.where(true_tensor == 1)[0].tolist()
+        
+        # Convert to sets for comparison
+        true_set = set(true_indices)
+        pred_set = set(pred)
+        
+        # Check if they match exactly
+        if true_set == pred_set:
+            matching_indices.append(i)
+        else:
+            non_matching_indices.append(i)
+    
+    return matching_indices, non_matching_indices
+
 
 def plot_samples_from_specific_label_with_acc(ds_val, predlabels, label_to_filter, class_accuracies, correct=True, data_name='Unknown', outfolder='./Data'):
-    fig, ax = plt.subplots(6, 6, sharex=True, sharey=True, figsize=(20,20))
-    idx = -1
+    
+    non_matching_indices = []
+    matching_indices = []
+    for i, pred in enumerate(predlabels):
+        if label_to_filter in pred:
+            matching_indices.append(i)
+        else:
+            non_matching_indices.append(i)
 
-    for i in range(6):
-        for j in range(6):
-            while True:
-                idx = np.random.choice(len(ds_val), 1, replace=False)
-                if label_to_filter in predlabels[idx[0]] and correct == True:
-                            break
-                if label_to_filter not in predlabels[idx[0]] and correct == False:
-                            break
- 
-            s = ds_val[idx[0]]
+    print(matching_indices, non_matching_indices)
+    if correct:
+        if len(matching_indices) > 36:
+            indices_to_use = np.random.choice(matching_indices, 36, replace=False)
+        else:
+            indices_to_use = matching_indices
+    else:
+        if len(non_matching_indices) > 36:
+            indices_to_use = np.random.choice(non_matching_indices, 36, replace=False)
+        else:
+            indices_to_use = non_matching_indices
+
+    num_images = min(len(indices_to_use), 36)
+    if num_images == 0:
+        print(f"No samples to plot for label {label_to_filter} (correct={correct}).")
+        return
+
+    grid1, grid2 = find_optimal_grid(num_images)
+    # If only one image, make sure ax is always 2D for consistent indexing
+    fig, ax = plt.subplots(grid1, grid2, sharex=True, sharey=True, figsize=(20,20))
+    ax = np.array(ax)
+    ax = ax.reshape(-1)  # Flatten for easy indexing
+
+
+    for idx, index in enumerate(indices_to_use):
+        if idx >= len(ax):
+            break  # Prevent IndexError if more images than subplots
+        s = ds_val[index]
+        if s['images'].shape[0] != 1:
+            image = np.transpose(s['images'][0:1,:,:], (1, 2, 0))
+        else:
             image = np.transpose(s['images'], (1, 2, 0))
-            image = normalize_image(image)  # Normalize the image
-            ax[i,j].imshow(image, cmap='gray')
-            ax[i,j].set_title(f"G: {label_to_filter}\nP: {predlabels[idx[0]]}", fontsize=19)
-            ax[i,j].axis('off')
+        # Scale image from mean~0, std~1 to [0, 1] for display
+        image = (image - image.min()) / (image.max() - image.min() + 1e-8) * 255
+        ax[idx].imshow(image, cmap='gray')
+        ax[idx].set_title(f"G: {label_to_filter}\nP: {predlabels[index]}", fontsize=19)
+        ax[idx].axis('off')
+
+    # Hide any unused subplots
+    for idx in range(len(indices_to_use), len(ax)):
+        ax[idx].axis('off')
+
     if correct:
         flag='correct'
     else:

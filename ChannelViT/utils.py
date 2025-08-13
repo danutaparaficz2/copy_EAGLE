@@ -5,12 +5,13 @@ import numpy as np
 import pandas as pd
 import torch.nn.functional as F
 from torch import nn
-
+from matplotlib import pyplot as plt
 import random
 import os
 import json
 from PIL import Image, ImageEnhance, ImageOps
 import math
+from torchvision.transforms import RandomAffine
 
 
 
@@ -160,7 +161,36 @@ def normalize_image(image):
     return (norm).astype(np.uint8)
 
 
-def augment_underrepresented_classes(datas):
+def augment_underrepresented_classes(datass):
+    if type(datass) == list:
+        datas = datass.copy() 
+    else:
+        # Convert data format if needed
+        converted_datas = []
+        for data in datass:
+            if isinstance(data, dict):
+                if 'images' in data and 'labels' in data:
+                    # Convert from {'images': ..., 'labels': ..., 'channels': ...} 
+                    # to {0: ..., 1: ..., 2: ...} format
+                    converted_item = {
+                        0: data['images'],
+                        1: data['labels'],
+                        2: data.get('channels', None)
+                    }
+                    converted_datas.append(converted_item)
+                else:
+                    # Already in correct format or handle tuple format
+                    converted_datas.append(data)
+            else:
+                # Handle tuple format (image, label)
+                if len(data) == 2:
+                    converted_item = {0: data[0], 1: data[1]}
+                    converted_datas.append(converted_item)
+                else:
+                    converted_datas.append(data)
+        
+        datas = converted_datas
+
     print("Augmenting underrepresented classes...")
     print("Augmenting underrepresented classes...")
     print("Augmenting underrepresented classes...")
@@ -174,7 +204,7 @@ def augment_underrepresented_classes(datas):
     augmented_data = []
     # Exclude class 0 from the average count calculation
     avg_count = np.max([count for label, count in label_counts.items()])
-    threshold = avg_count * 0.85  # Set threshold to 75% of the average count
+    threshold = avg_count * 0.6  # Set threshold to 60% of the average count
 
     for label, count in label_counts.items():
         if count==0:
@@ -186,28 +216,47 @@ def augment_underrepresented_classes(datas):
             print('num_augmentations', num_augmentations, label, count, threshold)
             for _ in range(num_augmentations):
                 sample = random.choice(samples_to_augment)
-                augmented_image = augmentation_fn(sample[0])
+                augmented_image = improved_augmentation_fn(sample[0])
 
 
                 # Randomly choose between the two augmentation functions
                 # if np.random.rand() > 0.5:
                 # else:
                 #     augmented_image = augmentation_fn_combine(image, datas, label)
-                augmented_data.append({0:augmented_image, 1:sample[1]})
+                augmented_data.append((augmented_image, sample[1]))
 
-                # Visualize original and augmented images
+                # # Visualize original and augmented images
                 # fig, axes = plt.subplots(1, 2, figsize=(10, 5))
-                # axes[0].imshow(np.array(sample['images'])[0])                
+                # img = sample[0]
+                # aug_img = augmented_image.copy()
+                # # Convert img for display (grayscale)
+                # if isinstance(img, torch.Tensor):
+                #     img = img.clone().detach().cpu().numpy()
+                #     # If image has shape (C, H, W), take first channel
+                #     if img.ndim == 3:
+                #         img = img[0]  # Take first channel for grayscale
+                #         aug_img = aug_img[0]  # Take first channel for grayscale
+                #     elif img.ndim == 2:
+                #         pass  # Already H, W
+                #     else:
+                #         img = np.squeeze(img)
+                #     # Normalize to [0, 1]
+                #     img_min = img.min()
+                #     img_max = img.max()
+                #     if img_max > img_min:
+                #         img = (img - img_min) / (img_max - img_min)
+                #         aug_img = (aug_img - img_min) / (img_max - img_min)
+                #     else:
+                #         img = np.zeros_like(img)
+
+                # axes[0].imshow(img, cmap='gray')
                 # axes[0].set_title('Original Image')
                 # axes[0].axis('off')
-                # axes[1].imshow(np.array(augmented_image))
+                # axes[1].imshow(aug_img, cmap='gray')
                 # axes[1].set_title('Augmented Image')
                 # axes[1].axis('off')
-                # # plt.show()
-                # # Ensure the folder exists before saving the plot
-                # os.makedirs('./Augmented', exist_ok=True)
-                # # Save the plot
-                # plt.savefig(f'./Augmented/augmented_image_{label}_{_}.png')
+                # os.makedirs('./Augmented1', exist_ok=True)
+                # plt.savefig(f'./Augmented1/augmented_image_{label}_{_}.png')
                 # plt.close()
 
     datas.extend(augmented_data)
@@ -224,6 +273,44 @@ def augmentation_fn(image):
     # enhancer = ImageEnhance.Contrast(image)
     # image = enhancer.enhance(np.random.uniform(0.8, 1.2))
 
+    return image
+def improved_augmentation_fn(image):
+    # Apply geometric transforms
+    if random.random() > 0.5:
+        image = torch.flip(image, dims=[-1]) # Horizontal flip
+    
+    if random.random() > 0.5:
+        image = torch.flip(image, dims=[-2]) # Vertical flip
+    
+    fold = random.choice([0, 1, 2, 3])
+    image = torch.rot90(image, k=fold, dims=(-2, -1))
+    
+    # Apply photometric transforms
+    brightness_factor = random.uniform(0.99, 1.01)
+    contrast_factor = random.uniform(0.99, 1.01)
+    # Use RandomAffine for a combination of rotations, translations, and shearing
+    # This provides more diverse and realistic variations
+    affine_transform = RandomAffine(
+        degrees=(-0.5, 0.5),        # Random rotation between -30 and 30 degrees
+        translate=(0.03, 0.03),     # Random horizontal and vertical translation up to 3%
+        shear=(-1, 1)           # Random shearing between -15 and 15 degrees
+    )
+    image = affine_transform(image)
+
+    # Assuming the image is a PyTorch tensor
+    # Note: These operations might need to be adjusted based on image tensor shape
+    image = image * brightness_factor
+
+    
+    # Add Gaussian noise
+    # Add Gaussian noise with mean 0 and a chosen standard deviation
+    noise_std = torch.rand(1) * 0.03
+    noise = torch.randn_like(image) * noise_std
+    image = image + noise
+    
+    # Clip values to stay within a valid range
+    # image = torch.clamp(image, 0, 255)
+    
     return image
 
 def combine_images(image1, image2):
@@ -352,12 +439,17 @@ def count_data_per_class_in_labels(labelss):
 #     return True
 
 def find_optimal_grid(n):
-    """Return the optimal grid dimensions for plotting n images."""
-    for i in range(int(math.sqrt(n)), 0, -1):
-        if n % i == 0 and i>1:
-            return i, n // i
-        elif n % i == 0 and i==1:
-            return (n-1)//2, 2
+    """Return grid dimensions (rows, cols) for plotting n images, aiming for a shape as square as possible."""
+    best_diff = n  # Initialize with a large difference
+    best_rows, best_cols = 1, n
+    for rows in range(1, int(math.sqrt(n)) + 2):
+        cols = math.ceil(n / rows)
+        if rows * cols >= n:
+            diff = abs(rows - cols)
+            if diff < best_diff:
+                best_diff = diff
+                best_rows, best_cols = rows, cols
+    return best_rows, best_cols
 
 
 def class_label_save(predlabels, im_names, label_names,  file_name='predictions_tiso.parquet'):

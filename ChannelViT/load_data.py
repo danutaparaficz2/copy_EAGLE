@@ -393,50 +393,110 @@ class Load_Data_Handler:
                 label_counts[label] = 1
         return label_counts
 
+def find_specific_subfolders_in_bboxes(bboxes_path, keyword):
+    """Find all subfolders in the bboxes directory that contain the specified keyword"""
+    specific_subfolders = []
+
+    if os.path.exists(bboxes_path):
+        for item in os.listdir(bboxes_path):
+            if keyword in item and os.path.isdir(os.path.join(bboxes_path, item)):
+                specific_subfolders.append(bboxes_path+item)
+                print(f"Found subfolder: {item}")
+
+    return specific_subfolders
+
 class Load_Data_Handler_notlabeled:
-    def __init__(self, PATH, subfolder):
+    def __init__(self, PATH, subfolder_name):
         current_dir = os.path.dirname(os.path.abspath(__file__))
         
-        panelfolder = PATH+'/bboxes/'+subfolder
-        elpaths =  [file for file in os.listdir(panelfolder) if "_EL_" in file and file.endswith(".tif")]
-        uvpaths =  [file for file in os.listdir(panelfolder) if "_UV_" in file and file.endswith(".tif")]
-        vispaths = [file for file in os.listdir(panelfolder) if "_VI_" in file and file.endswith(".tif")]
-        
-        label_types = ["good", "crack", "cross", "dark", "corrosion"]
-        
-        # sorted_elpaths = sorted(elpaths, key=lambda x: (int(re.search(r'^(\d+)', x).group(1)), int(re.search(r'Cell(\d+)', x).group(1))))
-        # sorted_uvpaths = sorted(uvpaths, key=lambda x: (int(re.search(r'^(\d+)', x).group(1)), int(re.search(r'Cell(\d+)', x).group(1))))
-        # sorted_vispaths = sorted(vispaths, key=lambda x: (int(re.search(r'^(\d+)', x).group(1)), int(re.search(r'Cell(\d+)', x).group(1))))
-        elpaths.sort()
-        uvpaths.sort()
-        vispaths.sort()
-        assert len(elpaths) == len(uvpaths) == len(vispaths), "Mismatch in number of images across channels" 
-        elpaths_with_subfolder = [os.path.join(subfolder, fname) for fname in elpaths]
+        panelfolder_bboxes = PATH+'/bboxes/'
+        infinity_folders = find_specific_subfolders_in_bboxes(panelfolder_bboxes, subfolder_name)
+        print(f"Found  folders: {infinity_folders}")
+        # Process each Infinity folder
+        for panelfolder in infinity_folders:
 
-        files_by_folder = separate_files_by_folder(elpaths_with_subfolder)
+            print(f"Processing  folder: {panelfolder}")
+            # if 'tif' in file
+            if 'tif' in  str(os.listdir(panelfolder)):
+                elpaths =  [file for file in os.listdir(panelfolder) if "_EL_" in file and file.endswith(".tif")]
+                uvpaths =  [file for file in os.listdir(panelfolder) if "_UV_" in file and file.endswith(".tif")]
+                vispaths = [file for file in os.listdir(panelfolder) if "_VI_" in file and file.endswith(".tif")]
+            elif 'png' in str(os.listdir(panelfolder)):
+                elpaths =  [file for file in os.listdir(panelfolder) if "_EL_" in file and file.endswith(".png")]
+                uvpaths =  [file for file in os.listdir(panelfolder) if "_UV_" in file and file.endswith(".png")]
+                vispaths = [file for file in os.listdir(panelfolder) if "_VI_" in file and file.endswith(".png")]
+            else:
+                raise ValueError("No valid image files found in the specified folder. Expected files with '_EL_', '_UV_', or '_VI_' in their names and '.tif' or '.png' extensions.")
+            # label_types = ["good", "crack", "cross", "dark", "corrosion"]
+            
+            # sorted_elpaths = sorted(elpaths, key=lambda x: (int(re.search(r'^(\d+)', x).group(1)), int(re.search(r'Cell(\d+)', x).group(1))))
+            # sorted_uvpaths = sorted(uvpaths, key=lambda x: (int(re.search(r'^(\d+)', x).group(1)), int(re.search(r'Cell(\d+)', x).group(1))))
+            # sorted_vispaths = sorted(vispaths, key=lambda x: (int(re.search(r'^(\d+)', x).group(1)), int(re.search(r'Cell(\d+)', x).group(1))))
+            elpaths.sort()
+            uvpaths.sort()
+            vispaths.sort()
+            subfolder = os.path.basename(panelfolder)
+            assert len(elpaths) == len(uvpaths) == len(vispaths), "Mismatch in number of images across channels" 
+            elpaths_with_subfolder = [os.path.join(subfolder, fname) for fname in elpaths]
 
-        for technology in ['_EL_', '_UV_', '_VI_']:
-            if technology == '_EL_':
-                self.images_el = normalize_image_0_255(files_by_folder, PATH, technology)
-            elif technology == '_UV_':
-                self.images_uv = normalize_image_0_255(files_by_folder, PATH, technology)
-            elif technology == '_VI_':
-                self.images_vis = normalize_image_0_255(files_by_folder, PATH, technology)
-        # self.images_el = [np.array(Image.open(PATH+'/segments/'+subfolder+'/'+path).convert('L')).astype(np.uint8) for path in elpaths]
-        # self.images_uv = [np.array(Image.open(PATH+'/segments/'+subfolder+'/'+path).convert('L')).astype(np.uint8) for path in uvpaths]
-        # self.images_vis = [np.array(Image.open(PATH+'/segments/'+subfolder+'/'+path).convert('L')).astype(np.uint8) for path in vispaths]
+            files_by_folder = separate_files_by_folder(elpaths_with_subfolder)
 
-        # Combine the 3 lists of grayscale images into one list of RGB images
-        # self.images = [np.stack((el, uv, vis), axis=-1) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
-        # self.images = [np.concatenate((el, uv, vis), axis=-1) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
-        self.images = [np.stack((el, uv, vis), axis=-1)for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
-        self.data = list(zip(self.images))
-        self.sorted_elpaths = elpaths
+            for technology in ['_EL_', '_UV_', '_VI_']:
+                if technology == '_EL_':
+                    self.images_el, _ = normalize_image_0_255(files_by_folder, PATH, technology)
+                elif technology == '_UV_':
+                    self.images_uv, _ = normalize_image_0_255(files_by_folder, PATH, technology)
+                elif technology == '_VI_':
+                    self.images_vis, _ = normalize_image_0_255(files_by_folder, PATH, technology)
+            # self.images_el = [np.array(Image.open(PATH+'/segments/'+subfolder+'/'+path).convert('L')).astype(np.uint8) for path in elpaths]
+            # self.images_uv = [np.array(Image.open(PATH+'/segments/'+subfolder+'/'+path).convert('L')).astype(np.uint8) for path in uvpaths]
+            # self.images_vis = [np.array(Image.open(PATH+'/segments/'+subfolder+'/'+path).convert('L')).astype(np.uint8) for path in vispaths]
+
+            # Combine the 3 lists of grayscale images into one list of RGB images
+            # self.images = [np.stack((el, uv, vis), axis=-1) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
+            # self.images = [np.concatenate((el, uv, vis), axis=-1) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
+            mismatched_indices = self.debug_image_shapes()
+            self.images = [np.stack((el, uv, vis), axis=-1)for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
+            self.data = list(zip(self.images))
+            self.sorted_elpaths = elpaths
         
     def get_data(self):
         return self.data, self.sorted_elpaths
     
+    def debug_image_shapes(self):
+        """Debug function to find shape mismatches before stacking"""
+        print("=== DEBUGGING IMAGE SHAPES ===")
+        print(f"Number of EL images: {len(self.images_el)}")
+        print(f"Number of UV images: {len(self.images_uv)}")
+        print(f"Number of VIS images: {len(self.images_vis)}")
+        
+        mismatched_indices = []
+        
+        for i, (el, uv, vis) in enumerate(zip(self.images_el, self.images_uv, self.images_vis)):
+            el_shape = el.shape if hasattr(el, 'shape') else 'No shape'
+            uv_shape = uv.shape if hasattr(uv, 'shape') else 'No shape'
+            vis_shape = vis.shape if hasattr(vis, 'shape') else 'No shape'
+            
+            # Print first 5 shapes for inspection
+            if i < 5:
+                print(f"Image {i}: EL={el_shape}, UV={uv_shape}, VIS={vis_shape}")
+            
+            # Check for mismatches
+            if el.shape != uv.shape or el.shape != vis.shape:
+                print(f"MISMATCH at index {i}:")
+                print(f"  EL shape: {el_shape}")
+                print(f"  UV shape: {uv_shape}")
+                print(f"  VIS shape: {vis_shape}")
+                mismatched_indices.append(i)
+                
+                if len(mismatched_indices) >= 10:  # Stop after finding 10 mismatches
+                    print("... (stopping after 10 mismatches)")
+                    break
+        
+        print(f"Total mismatched images: {len(mismatched_indices)}")
+        return mismatched_indices
 
+# Add this method to your Load_Data_Handler_notlabeled class
 
 class PVDataset(torch.utils.data.Dataset):
     def __init__(self, df, channels, scale=1, return_labels=True):

@@ -5,7 +5,7 @@ from transformers import TrainingArguments, Trainer
 from hubconf import camelyon_channelvit_small_p8_with_hcs_supervised, so2sat_channelvit_small_p8_with_hcs_random_split_supervised
 import torch
 from torch import nn
-
+import os
 from channelvit.backbone.hcs_channel_vit import hcs_channelvit_small
 
 # My libraries
@@ -139,10 +139,98 @@ def load_model(args, folder, device, weights_path, num_classes):
 
   # Load the model
 def load_post_trained_model(args, folder, device, weights_path, num_classes):
-    model = hcs_channelvit_small(patch_size= args.patch_size, in_chans=args.in_chans)
+    model = hcs_channelvit_small(patch_size= args.patch_size, in_chans=args.max_channels)
     # num_classes = 4  # Replace with the actual number of classes in your dataset
     model.head = nn.Linear(model.norm.normalized_shape[0], num_classes)
     model.load_state_dict(torch.load(folder+weights_path+'.pth', map_location=device))
 
     model.to(device)
     return model
+
+
+
+def retrain_resume_or_load_pretrained_second_stage(args, current_dir, input_model_folder, device, output_model_folder,concat_train=None, concat_val=None, 
+                                      channels=None, name_flag=''):
+    # Model with originally pretrained weights
+    if args.retrain == 'retrain':
+        model = load_post_trained_model(args, current_dir+output_model_folder, device, 'trained_state_dict', args.num_classes)
+        trainer = init_trainer(args, model, concat_val,  current_dir+output_model_folder)
+        trainer = train_save_model(
+            trainer,
+            concat_train,   # train_dataset (should be your ConcatDataset)
+            concat_val,     # val_dataset (should be your ConcatDataset)
+            current_dir+output_model_folder
+        )
+
+
+        # ploting_training_results(trainer, current_dir+output_model_folder+'duramat_'+str(len(channels))+'channels'+name_flag+'/')
+    elif args.retrain == 'resume':
+        model = load_post_trained_model(args, current_dir+output_model_folder, device, 'trained_state_dict', args.num_classes)
+        args.num_train_epochs = 15
+        trainer = init_trainer(args, model, concat_val, current_dir+output_model_folder)
+        # Check if there are checkpoints in the output folder
+        checkpoints = [d for d in os.listdir(current_dir+output_model_folder) if d.startswith('checkpoint-')]
+        # Sort checkpoints by the number in their name and get the latest one
+        latest_checkpoint = os.path.join(current_dir+output_model_folder, sorted(checkpoints, key=lambda x: int(x.split('-')[-1]))[-1])
+        trainer.train(resume_from_checkpoint=latest_checkpoint)
+    else:
+        model = load_post_trained_model(args, current_dir+output_model_folder, device, 'trained_state_dict', args.num_classes)
+        # model = load_post_trained_model(args, current_dir+output_model_folder+'duramat_'+str(len(channels))+'channels'+name_flag+'/', device, 'trained_state_dict', args.num_classes)
+        
+        trainer = init_trainer(args, model, concat_val, current_dir+output_model_folder)
+  
+        checkpoints = [d for d in os.listdir(current_dir+output_model_folder) if d.startswith('checkpoint-')]
+        if not checkpoints:
+            print("No checkpoints found. Training the model.")
+            trainer.train()
+        else:
+            print("Found checkpoints, loading the latest one.")
+        # Sort checkpoints by the number in their name and get the latest one
+        latest_checkpoint = os.path.join(current_dir+output_model_folder, sorted(checkpoints, key=lambda x: int(x.split('-')[-1]))[-1])
+        # Restore state without continuing training
+        trainer._load_from_checkpoint(latest_checkpoint)
+        print(f"Trainer state restored from {latest_checkpoint}")
+    return trainer
+
+def retrain_resume_or_load_pretrained(args, current_dir, input_model_folder, device, output_model_folder,concat_train=None, concat_val=None, 
+                                      channels=None, name_flag=''):
+    # Model with originally pretrained weights
+    if args.retrain == 'retrain':
+        model = load_model(args, current_dir+input_model_folder, device, args.init_weights_name, args.num_classes)
+        trainer = init_trainer(args, model, concat_val,  current_dir+output_model_folder)
+        trainer = train_save_model(
+            trainer,
+            concat_train,   # train_dataset (should be your ConcatDataset)
+            concat_val,     # val_dataset (should be your ConcatDataset)
+            current_dir+output_model_folder
+        )
+
+
+        # ploting_training_results(trainer, current_dir+output_model_folder+'duramat_'+str(len(channels))+'channels'+name_flag+'/')
+    elif args.retrain == 'resume':
+        model = load_model(args, current_dir+input_model_folder, device, args.init_weights_name, args.num_classes)
+        args.num_train_epochs = 15
+        trainer = init_trainer(args, model, concat_val, current_dir+output_model_folder)
+        # Check if there are checkpoints in the output folder
+        checkpoints = [d for d in os.listdir(current_dir+output_model_folder) if d.startswith('checkpoint-')]
+        # Sort checkpoints by the number in their name and get the latest one
+        latest_checkpoint = os.path.join(current_dir+output_model_folder, sorted(checkpoints, key=lambda x: int(x.split('-')[-1]))[-1])
+        trainer.train(resume_from_checkpoint=latest_checkpoint)
+    else:
+        model = load_model(args, current_dir+input_model_folder, device, args.init_weights_name, args.num_classes)
+        # model = load_post_trained_model(args, current_dir+output_model_folder+'duramat_'+str(len(channels))+'channels'+name_flag+'/', device, 'trained_state_dict', args.num_classes)
+        
+        trainer = init_trainer(args, model, concat_val, current_dir+output_model_folder)
+  
+        checkpoints = [d for d in os.listdir(current_dir+output_model_folder) if d.startswith('checkpoint-')]
+        if not checkpoints:
+            print("No checkpoints found. Training the model.")
+            trainer.train()
+        else:
+            print("Found checkpoints, loading the latest one.")
+        # Sort checkpoints by the number in their name and get the latest one
+        latest_checkpoint = os.path.join(current_dir+output_model_folder, sorted(checkpoints, key=lambda x: int(x.split('-')[-1]))[-1])
+        # Restore state without continuing training
+        trainer._load_from_checkpoint(latest_checkpoint)
+        print(f"Trainer state restored from {latest_checkpoint}")
+    return trainer
