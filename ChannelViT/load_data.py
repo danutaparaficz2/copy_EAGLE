@@ -16,13 +16,16 @@ from torch.utils.data.dataloader import default_collate
 from tqdm import tqdm
 
 
-def just_transform(data, channels=[0], name=''):
+def just_transform(data, channels=[0], name='', notlabeled=False):
     """
     Preprocess all images (resize, normalize, stack channels) and save as a single .pt file.
     """
 
     images = [item[0] for item in data]  # Extract images
-    labels = [item[1] for item in data]  # Extract labels
+    if notlabeled:
+        labels = [[1,0,0,0,0,0,0] for _ in data]
+    else:
+        labels = [item[1] for item in data]  # Extract labels
     # Define transforms
     el_transform = transforms.Compose([
         transforms.ToPILImage(),
@@ -406,7 +409,7 @@ def find_specific_subfolders_in_bboxes(bboxes_path, keyword):
     return specific_subfolders
 
 class Load_Data_Handler_notlabeled:
-    def __init__(self, PATH, subfolder_name):
+    def __init__(self, PATH, args, subfolder_name):
         current_dir = os.path.dirname(os.path.abspath(__file__))
         
         panelfolder_bboxes = PATH+'/bboxes/'
@@ -445,9 +448,9 @@ class Load_Data_Handler_notlabeled:
                 if technology == '_EL_':
                     self.images_el, _ = normalize_image_0_255(files_by_folder, PATH, technology)
                 elif technology == '_UV_':
-                    self.images_uv, _ = normalize_image_0_255(files_by_folder, PATH, technology)
+                    self.images_uv, _ = normalize_image_0_255(files_by_folder, PATH, technology, all_colors=args.all_colors)
                 elif technology == '_VI_':
-                    self.images_vis, _ = normalize_image_0_255(files_by_folder, PATH, technology)
+                    self.images_vis, _ = normalize_image_0_255(files_by_folder, PATH, technology, all_colors=args.all_colors)
             # self.images_el = [np.array(Image.open(PATH+'/segments/'+subfolder+'/'+path).convert('L')).astype(np.uint8) for path in elpaths]
             # self.images_uv = [np.array(Image.open(PATH+'/segments/'+subfolder+'/'+path).convert('L')).astype(np.uint8) for path in uvpaths]
             # self.images_vis = [np.array(Image.open(PATH+'/segments/'+subfolder+'/'+path).convert('L')).astype(np.uint8) for path in vispaths]
@@ -455,8 +458,12 @@ class Load_Data_Handler_notlabeled:
             # Combine the 3 lists of grayscale images into one list of RGB images
             # self.images = [np.stack((el, uv, vis), axis=-1) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
             # self.images = [np.concatenate((el, uv, vis), axis=-1) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
-            mismatched_indices = self.debug_image_shapes()
-            self.images = [np.stack((el, uv, vis), axis=-1)for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
+            # mismatched_indices = self.debug_image_shapes()
+
+            if args.all_colors:
+                self.images = [np.concatenate((el[:,:,None], uv, vis), axis=-1) for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
+            else:
+                self.images = [np.stack((el, uv, vis), axis=-1)for el, uv, vis in zip(self.images_el, self.images_uv, self.images_vis)]
             self.data = list(zip(self.images))
             self.sorted_elpaths = elpaths
         

@@ -142,7 +142,7 @@ if __name__ == '__main__':
 
     model = load_post_trained_model(args, current_dir+output_model_folder, device, 'trained_state_dict', args.num_classes)
     # Initialize the trainer for the second stage
-    args.num_train_epochs = 2
+    args.num_train_epochs = 20
     trainer_7channel = init_trainer(args, model, dataset_temp_cleaned_7channel_data, current_dir + output_model_folder)
 
     # Train the model with the 7-channel data
@@ -170,21 +170,27 @@ if __name__ == '__main__':
                                         #   outputfolder=current_dir+images_folder)
 
     # #################################################  Label more data #########################################################
-    data_loader_2  = Load_Data_Handler_notlabeled(path_Website, 'Infinity')
-    data_Infinity_notlabeled, _ = data_loader_2.get_data()
-    data_Infinity_notlabeled_small = just_transform(data_Infinity_notlabeled, channels=channels)
+    if os.path.exists(current_dir+'/Data/processed_notlabeledn_'+name_flag+'.pth'):
+        with open(current_dir+'/Data/processed_notlabeledn_'+name_flag+'.pth', 'rb') as f:
+            data = torch.load(f)
+            data_Infinity_notlabeled_small = data['data_Infinity_notlabeled_small']
+    else:
+        data_loader_2  = Load_Data_Handler_notlabeled(path_Website, args, 'Infinity')
+        data_Infinity_notlabeled, _ = data_loader_2.get_data()
+        data_Infinity_notlabeled_small = just_transform(data_Infinity_notlabeled, channels=channels, notlabeled=True)
 
-    with open(current_dir+'/Data/processed_notlabeled_'+name_flag+'.pth', 'wb') as f:
-        torch.save(
-            {'data_Infinity_notlabeled': data_Infinity_notlabeled},
-            f)
+        with open(current_dir+'/Data/processed_notlabeledn_'+name_flag+'.pth', 'wb') as f:
+            torch.save(
+                {'data_Infinity_notlabeled_small': data_Infinity_notlabeled_small},
+                f)
 
-    dataset_Infinity_notlabeled   = PVDataset(data_Infinity_notlabeled, channels=[channels]*len(data_Infinity_notlabeled),   scale=1, return_labels=False)
+    dataset_Infinity_notlabeled   = PVDataset(data_Infinity_notlabeled_small, channels=[channels]*len(data_Infinity_notlabeled_small), scale=1, return_labels=True)
 
-    predictions = trainer_7channel.predict(dataset_temp_cleaned_7channel_data) 
-    integer_labels = [torch.argmax(label).item() for _, label in predictions]
-
-    save_images_by_label(data_Infinity_notlabeled, integer_labels, current_dir+images_folder+'/data_Infinity_notlabeled/',  name_flag=name_flag)
+    predictions = trainer_7channel.predict(dataset_Infinity_notlabeled) 
+    pred_labels = logits_to_classes(predictions, initial_threshold=0.5)
+    predlabels = convert_list_of_arrays_to_labels(pred_labels)
+    save_images_by_label(data_Infinity_notlabeled, predlabels, current_dir+images_folder+'/data_Infinity_notlabeled_good/', flag='Website', name_flag=name_flag)
+    exit()
 
     #################### TRAIN ON ONLY 1CHANNEL WEBSITE DATA #########################################################
     # Modify dataset_temp_cleaned_7channel_data to use only the first channel for each sample
