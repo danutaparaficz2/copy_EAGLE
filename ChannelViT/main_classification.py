@@ -5,6 +5,7 @@ import re
 import argparse
 PYTORCH_ENABLE_MPS_FALLBACK=1
 #### Local imports
+from training_multi_one_input_type import retrain_resume_or_load_pretrained_second_stage
 from load_data import AlternatingBatchSampler, PVDataset, find_outliers, load_all_data_together, Load_Data_Handler_notlabeled, just_transform, ConcatDataset
 from utils import  (convert_list_of_arrays_to_labels, calculate_class_accuracy_one_hot, class_label_save, label_names, 
                     augment_underrepresented_classes, logits_to_classes, threshold_and_max)
@@ -17,16 +18,16 @@ import json
 def parse_args():
 
     parser = argparse.ArgumentParser(description="Train and evaluate the model.")
-    parser.add_argument('--num_train_epochs', type=int, default=12, help='Number of training epochs.')
+    parser.add_argument('--num_train_epochs', type=int, default=4, help='Number of training epochs.')
     parser.add_argument('--batch_size', type=int, default=5, help='Batch size for training and evaluation.')
-    parser.add_argument('--retrain', type=str, default='', help='retrain, resume or nothing to predict only.')
+    parser.add_argument('--retrain', type=str, default='retrain', help='retrain, resume or nothing to predict only.')
     parser.add_argument('--use_only_EL', action='store_true', default=False, help='Use only El images')
     parser.add_argument('--all_colors', action='store_true', default=True, help='Use only RGB images')
     parser.add_argument('--num_classes', type=int, default=7, help='Number of classes.')     
     parser.add_argument('--learning_rate', type=float, default=1e-5, help='Learning rate for training.')     
     # parser.add_argument('--one_type_of_input_only', action='store_true', default=False, help='Flag to choose if input will be with mixed number of classes or not.')
 
-    parser.add_argument('--init_weights_name', type=str, default='imagenet_channelvit_small_p16_with_hcs_supervised', help='Name of the initial weights file.')
+    parser.add_argument('--init_weights_name', type=str, default='so2sat_channelvit_small_p8_with_hcs_hard_split_supervised', help='Name of the initial weights file.')
    # imagenet_channelvit_small_p16_with_hcs_supervised, so2sat_channelvit_small_p8_with_hcs_hard_split_supervised
    # cpjump_cellpaint_bf_channelvit_small_p8_with_hcs_supervised, camelyon_channelvit_small_p8_with_hcs_supervised
     args = parser.parse_args()
@@ -139,37 +140,119 @@ if __name__ == '__main__':
                                                          concat_val=dataset_temp_cleaned_1channel_data, channels=channels, name_flag=name_flag+'Duramat')
     
     # ploting_training_results(trainer, current_dir+output_model_folder, last_checkpoint='', accuracies=[])
+     # --------------- SECOND STAGE TRAINING ----------------- #
+    args.retrain = 'retrain'
+    trainer_7channel = retrain_resume_or_load_pretrained_second_stage(args, current_dir, input_model_folder, device, output_model_folder,
+                                                   concat_train=dataset_train_cleaned_7channel_data, concat_val=dataset_temp_cleaned_7channel_data)
+    
 
-    model = load_post_trained_model(args, current_dir+output_model_folder, device, 'trained_state_dict', args.num_classes)
-    # Initialize the trainer for the second stage
-    args.num_train_epochs = 20
-    trainer_7channel = init_trainer(args, model, dataset_temp_cleaned_7channel_data, current_dir + output_model_folder)
+    # ####################################################  PREDICION MODE  TESTING #########################################################''
+    # # Modify dataset_temp_cleaned_7channel_data to use only the first channel
+    # temp_cleaned_7channel_data_1channel = [(img[0:1], lbl) for img, lbl in temp_cleaned_7channel_data]
+    # temp_cleaned_7channel_data_1channel = [(img, lbl) for img, lbl in temp_cleaned_7channel_data_1channel if lbl[5] == 0 and lbl[6] == 0]
+    # temp_cleaned_7channel_data_1channel = PVDataset(temp_cleaned_7channel_data_1channel, channels=[[0]]*len(temp_cleaned_7channel_data_1channel), scale=1, return_labels=True)
+    # predictions = trainer.predict(temp_cleaned_7channel_data_1channel) 
+    # # Example 3: Aggressive approach - more predictions
+    # pred_labels = logits_to_classes(
+    #     predictions,
+    #     initial_threshold=0.1,      # Low initial threshold
+    #     relative_threshold=0.5,     # Within 50% of max probability
+    #     min_confidence=0.05         # Very low minimum confidence
+    # )
+    # # pred_labels = logits_to_classes(predictions, initial_threshold=0.5)
 
-    # Train the model with the 7-channel data
-    trainer_7channel = train_save_model(
-        trainer_7channel,
-        dataset_train_cleaned_7channel_data,
-        dataset_temp_cleaned_7channel_data,
-        current_dir + output_model_folder + 'all_7channels_finetuned/'
-)
-    ploting_training_results(trainer_7channel, current_dir+output_model_folder+ 'all_7channels_finetuned/', last_checkpoint='', accuracies=[])
+    # predlabels = convert_list_of_arrays_to_labels(pred_labels)
+
+    # empty_indices = [i for i, x in enumerate(predlabels) if not x]
+    # predlabels = [x for i, x in enumerate(predlabels) if i not in empty_indices]
+    # pred_labels = [x for i, x in enumerate(pred_labels) if i not in empty_indices]
+    # temp_cleaned_7channel_data_1channel = [x for i, x in enumerate(temp_cleaned_7channel_data_1channel) if i not in empty_indices]
+
+    # true_labels = np.array([item['labels'] for item in temp_cleaned_7channel_data_1channel])
+    # class_names = label_names()
+    # # plot_multilabel_confusion_matrix(true_labels, pred_labels, class_names, output_path=None)
+    # # confusion_matrix_per_class(pred_labels, true_labels, plot=False, normalize=False)
+    # class_accuracies = {}
+    # print('################# ACCURACIES VALIDATION #################')
+    # for label in range(7):
+    #     label_name, class_accuracies[label], length = calculate_class_accuracy_one_hot(true_labels, pred_labels, class_label=label)
+    #     print(f"Class '{label_name}': accuracy={class_accuracies[label]:.2f}, count={length}")
+
+    # plot_samples_from_all_labels_with_acc(temp_cleaned_7channel_data_1channel, predlabels, class_accuracies, data_name='Website_test', 
+    #                                        outfolder=current_dir+images_folder, certainty= torch.sigmoid(torch.tensor(predictions[0])).numpy())
+
     ####################################################  PREDICION MODE   #########################################################
 
     predictions = trainer_7channel.predict(dataset_temp_cleaned_7channel_data) 
     pred_labels = logits_to_classes(predictions, initial_threshold=0.5)
     predlabels = convert_list_of_arrays_to_labels(pred_labels)
 
+    empty_indices = [i for i, x in enumerate(predlabels) if not x]
+    print(f"Number of empty values in predlabels: {len(empty_indices)}")
+    predlabels = [x for i, x in enumerate(predlabels) if i not in empty_indices]
+    pred_labels = [x for i, x in enumerate(pred_labels) if i not in empty_indices]
+    dataset_temp_cleaned_7channel_data = [x for i, x in enumerate(dataset_temp_cleaned_7channel_data) if i not in empty_indices]
+
+
     true_labels = np.array([item['labels'] for item in dataset_temp_cleaned_7channel_data])
+    class_names = label_names()
+    plot_multilabel_confusion_matrix(true_labels, pred_labels, class_names, output_path=None)
+    # confusion_matrix_per_class(pred_labels, true_labels, plot=False, normalize=False)
     class_accuracies = {}
     print('################# ACCURACIES VALIDATION #################')
     for label in range(7):
         label_name, class_accuracies[label], length = calculate_class_accuracy_one_hot(true_labels, pred_labels, class_label=label)
         print(f"Class '{label_name}': accuracy={class_accuracies[label]:.2f}, count={length}")
 
-    # plot_samples_from_all_labels_with_acc(dataset_temp_cleaned_7channel_data, predlabels, class_accuracies, data_name='Website', 
-                                        #   outputfolder=current_dir+images_folder)
+    plot_samples_from_all_labels_with_acc(dataset_temp_cleaned_7channel_data, predlabels, class_accuracies, data_name='Website', 
+                                           outfolder=current_dir+images_folder, certainty= torch.sigmoid(torch.tensor(predictions[0])).numpy())
 
     # #################################################  Label more data #########################################################
+    if os.path.exists(current_dir+'/Data/processed_notlabeled_TISO_'+name_flag+'.pth'):
+        with open(current_dir+'/Data/processed_notlabeled_TISO_'+name_flag+'.pth', 'rb') as f:
+            data = torch.load(f)
+            data_TISO_notlabeled_small = data['data_TISO_notlabeled_small']
+    else:
+        data_loader_2  = Load_Data_Handler_notlabeled(path_Website, args, 'TISO')
+        data_TISO_notlabeled, _ = data_loader_2.get_data()
+        data_TISO_notlabeled_small = just_transform(data_TISO_notlabeled, channels=channels, notlabeled=True)
+
+        with open(current_dir+'/Data/processed_notlabeled_TISO_'+name_flag+'.pth', 'wb') as f:
+            torch.save(
+                {'data_TISO_notlabeled_small': data_TISO_notlabeled_small},
+                f)
+    dataset_TISO_notlabeled   = PVDataset(data_TISO_notlabeled_small, channels=[channels]*len(data_TISO_notlabeled_small), scale=1, return_labels=True)
+
+    predictions = trainer_7channel.predict(dataset_TISO_notlabeled) 
+    pred_labels = logits_to_classes(predictions, initial_threshold=0.9)
+    predlabels = convert_list_of_arrays_to_labels(pred_labels)
+    save_images_by_label(data_TISO_notlabeled_small, predlabels, current_dir+images_folder+'/data_TISO_notlabeled_good/', flag='Website', name_flag=name_flag)
+
+
+    exit()
+
+
+    if os.path.exists(current_dir+'/Data/processed_notlabeled_C14_'+name_flag+'.pth'):
+        with open(current_dir+'/Data/processed_notlabeled_C14_'+name_flag+'.pth', 'rb') as f:
+            data = torch.load(f)
+            data_C14_notlabeled_small = data['data_C14_notlabeled_small']
+    else:
+        data_loader_2  = Load_Data_Handler_notlabeled(path_Website, args, 'C14')
+        data_C14_notlabeled, _ = data_loader_2.get_data()
+        data_C14_notlabeled_small = just_transform(data_C14_notlabeled, channels=channels, notlabeled=True)
+
+        with open(current_dir+'/Data/processed_notlabeled_C14_'+name_flag+'.pth', 'wb') as f:
+            torch.save(
+                {'data_C14_notlabeled_small': data_C14_notlabeled_small},
+                f)
+    dataset_C14_notlabeled   = PVDataset(data_C14_notlabeled_small, channels=[channels]*len(data_C14_notlabeled_small), scale=1, return_labels=True)
+
+    predictions = trainer_7channel.predict(dataset_C14_notlabeled) 
+    pred_labels = logits_to_classes(predictions, initial_threshold=0.5)
+    predlabels = convert_list_of_arrays_to_labels(pred_labels)
+    save_images_by_label(data_C14_notlabeled_small, predlabels, current_dir+images_folder+'/data_C14_notlabeled_good/', flag='Website', name_flag=name_flag)
+    exit()
+
     if os.path.exists(current_dir+'/Data/processed_notlabeledn_'+name_flag+'.pth'):
         with open(current_dir+'/Data/processed_notlabeledn_'+name_flag+'.pth', 'rb') as f:
             data = torch.load(f)
@@ -189,7 +272,7 @@ if __name__ == '__main__':
     predictions = trainer_7channel.predict(dataset_Infinity_notlabeled) 
     pred_labels = logits_to_classes(predictions, initial_threshold=0.5)
     predlabels = convert_list_of_arrays_to_labels(pred_labels)
-    save_images_by_label(data_Infinity_notlabeled, predlabels, current_dir+images_folder+'/data_Infinity_notlabeled_good/', flag='Website', name_flag=name_flag)
+    save_images_by_label(data_Infinity_notlabeled_small, predlabels, current_dir+images_folder+'/data_Infinity_notlabeled_good/', flag='Website', name_flag=name_flag)
     exit()
 
     #################### TRAIN ON ONLY 1CHANNEL WEBSITE DATA #########################################################

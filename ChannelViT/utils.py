@@ -15,18 +15,21 @@ from torchvision.transforms import RandomAffine
 
 
 
-def select_images_by_label(ds, predlabels, label):
+def select_images_by_label(ds, predlabels, label, certainty=None):
     selected_data = []
     selected_predlabels = []
+    selected_certainty = []
     for idx, s in enumerate(ds):
         if s['labels'][label] == 1:
                 selected_data.append(s)
                 if predlabels is not None:
                     selected_predlabels.append(predlabels[idx])
+                    selected_certainty.append(certainty[idx] if certainty is not None else None)
                 else:
                     selected_predlabels = None
-        
-    return selected_data, selected_predlabels
+                    selected_certainty = None
+
+    return selected_data, selected_predlabels, selected_certainty
 
 
 def threshold_and_max(arr, threshold=0.5):
@@ -481,7 +484,49 @@ def class_label_save(predlabels, im_names, label_names,  file_name='predictions_
     b.to_parquet(output_predictions_path, index=True)
     print(f"Predictions saved to {output_predictions_path}")
 
-def logits_to_classes(logits, initial_threshold=0.5):
+
+def logits_to_classes(logits, initial_threshold=0.2, relative_threshold=0.7, min_confidence=0.1):
+    """
+    Advanced adaptive thresholding with multiple fallback strategies.
+    
+    Args:
+        logits: The logits output by the model.
+        initial_threshold: Primary threshold for classification.
+        relative_threshold: Percentage of max probability to use as backup threshold.
+        min_confidence: Minimum confidence required for any prediction.
+    
+    Returns:
+        np.ndarray: Predicted class indices.
+    """
+    probabilities = torch.sigmoid(torch.tensor(logits[0])).numpy()
+    predicted_classes = np.zeros_like(probabilities, dtype=int)
+    
+    for i, prob in enumerate(probabilities):
+        pred = (prob > initial_threshold).astype(int)
+        
+        if pred.any():
+            # Strategy 1: Use initial threshold
+            predicted_classes[i] = pred
+        else:
+            # Strategy 2: Use relative threshold (X% of max probability)
+            max_prob = prob.max()
+            if max_prob >= min_confidence:
+                relative_thresh = max_prob * relative_threshold
+                pred_relative = (prob >= relative_thresh).astype(int)
+                
+                if pred_relative.any():
+                    predicted_classes[i] = pred_relative
+                else:
+                    # Strategy 3: Predict only the maximum if it meets minimum confidence
+                    max_idx = prob.argmax()
+                    pred[max_idx] = 1
+                    predicted_classes[i] = pred
+            # If max_prob < min_confidence, leave as all zeros
+    
+    return predicted_classes
+
+
+def logits_to_classes_old(logits, initial_threshold=0.2):
     """
     Convert logits to class predictions for multi-label classification with an adaptive threshold.
 

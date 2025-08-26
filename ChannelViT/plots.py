@@ -70,13 +70,18 @@ def save_images_by_label(images, labelss, output_dir, flag='', name_flag='', ori
                     # Save the combined image
                     combined_image.save(os.path.join(label_folder, f'image_{i}_gray_channels.png'))
                 elif name_flag == 'rgb':
+                    if type(imag) == torch.Tensor:
+                        imag = np.transpose(imag, (1, 2, 0)).numpy()
                     # Split the RGB image into its channels
                     red_channel = imag[:, :, 0]
                     green_channel = imag[:, :, 1:4]
                     blue_channel = imag[:, :, 4:7]
 
                     # Normalize and enhance contrast for each channel
+
                     red_channel = (red_channel - np.min(red_channel)) / (np.max(red_channel) - np.min(red_channel) + 1e-8) * 255
+                    green_channel = (green_channel - np.min(green_channel)) / (np.max(green_channel) - np.min(green_channel) + 1e-8) * 255
+                    blue_channel = (blue_channel - np.min(blue_channel)) / (np.max(blue_channel) - np.min(blue_channel) + 1e-8) * 255
 
                     green_channel = (255- green_channel) #* 255 # Brighten green channel
                     blue_channel = (255-blue_channel) #* 255  # Brighten blue channel
@@ -216,21 +221,21 @@ def ploting_training_results(trainer, outfolder, last_checkpoint='', accuracies=
     plt.savefig(outfolder+'/loss_plot1.png')
     plt.close()
 
-def plot_samples_from_all_labels_with_acc(ds_val, predlabels, class_accuracies, data_name='Unknown', outfolder='./Data'):
+def plot_samples_from_all_labels_with_acc(ds_val, predlabels, class_accuracies, data_name='Unknown', outfolder='./Data', certainty= None):
     unique_labels = list(class_accuracies.keys())
     for label in unique_labels:
         if class_accuracies.get(label) == 0.:
             break
-        selected_images, selected_predlabels = select_images_by_label(ds_val, predlabels, label) # selects images that originally are labeled in specific label
+        selected_images, selected_predlabels, selected_certainty = select_images_by_label(ds_val, predlabels, label, certainty=certainty) # selects images that originally are labeled in specific label
 
 
         if class_accuracies.get(label) < 0.9:
-            plot_samples_from_specific_label_with_acc(selected_images, selected_predlabels, label, class_accuracies, False, data_name, outfolder)
-            plot_samples_from_specific_label_with_acc(selected_images, selected_predlabels, label, class_accuracies, True, data_name, outfolder)
+            plot_samples_from_specific_label_with_acc(selected_images, selected_predlabels, label, class_accuracies, False, data_name, outfolder, certainty=selected_certainty)
+            plot_samples_from_specific_label_with_acc(selected_images, selected_predlabels, label, class_accuracies, True, data_name, outfolder, certainty=selected_certainty)
 
         else:
-            plot_samples_from_specific_label_with_acc(selected_images, selected_predlabels, label, class_accuracies, True, data_name, outfolder)
-            plot_samples_from_specific_label_with_acc(selected_images, selected_predlabels, label, class_accuracies, False, data_name, outfolder)
+            plot_samples_from_specific_label_with_acc(selected_images, selected_predlabels, label, class_accuracies, True, data_name, outfolder, certainty=selected_certainty)
+            plot_samples_from_specific_label_with_acc(selected_images, selected_predlabels, label, class_accuracies, False, data_name, outfolder, certainty=selected_certainty)
 
 def find_agreement_indices(true_labels, predlabels):
     """
@@ -264,8 +269,12 @@ def find_agreement_indices(true_labels, predlabels):
     return matching_indices, non_matching_indices
 
 
-def plot_samples_from_specific_label_with_acc(ds_val, predlabels, label_to_filter, class_accuracies, correct=True, data_name='Unknown', outfolder='./Data'):
-    
+def plot_samples_from_specific_label_with_acc(ds_val, predlabels, label_to_filter, class_accuracies, correct=True, data_name='Unknown', outfolder='./Data', certainty=None):
+    empty_indices = [i for i, x in enumerate(predlabels) if not x]
+    predlabels = [x for i, x in enumerate(predlabels) if i not in empty_indices]
+    ds_val = [x for i, x in enumerate(ds_val) if i not in empty_indices]
+    certainty = [x for i, x in enumerate(certainty) if i not in empty_indices]
+
     non_matching_indices = []
     matching_indices = []
     for i, pred in enumerate(predlabels):
@@ -309,7 +318,12 @@ def plot_samples_from_specific_label_with_acc(ds_val, predlabels, label_to_filte
         # Scale image from mean~0, std~1 to [0, 1] for display
         image = (image - image.min()) / (image.max() - image.min() + 1e-8) * 255
         ax[idx].imshow(image, cmap='gray')
-        ax[idx].set_title(f"G: {label_to_filter}\nP: {predlabels[index]}", fontsize=19)
+        if certainty is not None:
+            certainty_value = certainty[index][predlabels[index][0]]
+            certainty_value_for_ground_truth = certainty[index][label_to_filter]
+            ax[idx].set_title(f"G: {label_to_filter} ({certainty_value_for_ground_truth:.2f})\nP: {predlabels[index]} ({certainty_value:.2f})", fontsize=19)
+        else:
+            ax[idx].set_title(f"G: {label_to_filter}\nP: {predlabels[index]}", fontsize=19)
         ax[idx].axis('off')
 
     # Hide any unused subplots
@@ -399,7 +413,7 @@ def confusion_matrix_per_class(pred_labels, true_labels, plot=False, normalize=F
             title = f"Confusion matrix for class {class_idx}"
  
         print(title)
-        print(cm[class_idx])
+        print( [class_idx])
         if plot:
             plt.figure(figsize=(8, 6))
             disp = ConfusionMatrixDisplay(confusion_matrix=cm[class_idx])
