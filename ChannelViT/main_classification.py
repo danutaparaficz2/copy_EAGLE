@@ -1,3 +1,10 @@
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="urllib3")
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", message=".*pip's dependency resolver did not take into account.*", category=UserWarning)
+import urllib3
+warnings.filterwarnings("ignore", category=urllib3.exceptions.NotOpenSSLWarning)
+
 import torch
 import os
 import numpy as np
@@ -6,7 +13,7 @@ import argparse
 PYTORCH_ENABLE_MPS_FALLBACK=1
 #### Local imports
 from training_multi_one_input_type import retrain_resume_or_load_pretrained_second_stage
-from load_data import AlternatingBatchSampler, PVDataset, find_outliers, load_all_data_together, Load_Data_Handler_notlabeled, just_transform, ConcatDataset
+from load_data import AlternatingBatchSampler, PVDataset, get_train_transforms, get_val_transforms, find_outliers, load_all_data_together, Load_Data_Handler_notlabeled, just_transform, ConcatDataset
 from utils import  (convert_list_of_arrays_to_labels, calculate_class_accuracy_one_hot, class_label_save, label_names, 
                     augment_underrepresented_classes, logits_to_classes, threshold_and_max)
 from plots import save_images_by_label, confusion_matrix_per_class, plot_multilabel_confusion_matrix, plot_samples_from_all_labels_with_acc, ploting_training_results
@@ -18,9 +25,9 @@ import json
 def parse_args():
 
     parser = argparse.ArgumentParser(description="Train and evaluate the model.")
-    parser.add_argument('--num_train_epochs', type=int, default=4, help='Number of training epochs.')
+    parser.add_argument('--num_train_epochs', type=int, default=16, help='Number of training epochs.')
     parser.add_argument('--batch_size', type=int, default=5, help='Batch size for training and evaluation.')
-    parser.add_argument('--retrain', type=str, default='retrain', help='retrain, resume or nothing to predict only.')
+    parser.add_argument('--retrain', type=str, default='', help='retrain, resume or nothing to predict only.')
     parser.add_argument('--use_only_EL', action='store_true', default=False, help='Use only El images')
     parser.add_argument('--all_colors', action='store_true', default=True, help='Use only RGB images')
     parser.add_argument('--num_classes', type=int, default=7, help='Number of classes.')     
@@ -114,14 +121,20 @@ if __name__ == '__main__':
     train_cleaned_1channel_data, temp_cleaned_1channel_data = train_test_split(cleaned_1channel_data, test_size=0.2, random_state=42)
     train_cleaned_7channel_data, temp_cleaned_7channel_data = train_test_split(cleaned_7channel_data, test_size=0.3, random_state=42)
 
-    train_cleaned_1channel_data = augment_underrepresented_classes(train_cleaned_1channel_data)
-    train_cleaned_7channel_data = augment_underrepresented_classes(train_cleaned_7channel_data)
+    # train_cleaned_1channel_data = augment_underrepresented_classes(train_cleaned_1channel_data)
+    # train_cleaned_7channel_data = augment_underrepresented_classes(train_cleaned_7channel_data)
+    train_transforms = get_train_transforms()
+    val_transforms = get_val_transforms()
 
     # 2. Create PVDataset objects for each split
-    dataset_train_cleaned_1channel_data = PVDataset(train_cleaned_1channel_data, channels=[[0]]*(len(train_cleaned_1channel_data)+len(train_cleaned_7channel_data)), scale=1, return_labels=True)
-    dataset_temp_cleaned_1channel_data   = PVDataset(temp_cleaned_1channel_data, channels=[[0]]*(len(temp_cleaned_1channel_data)+len(temp_cleaned_7channel_data)), scale=1, return_labels=True)
-    dataset_train_cleaned_7channel_data = PVDataset(train_cleaned_7channel_data, channels=[channels]*len(train_cleaned_7channel_data), scale=1, return_labels=True)
-    dataset_temp_cleaned_7channel_data   = PVDataset(temp_cleaned_7channel_data, channels=[channels]*len(temp_cleaned_7channel_data),   scale=1, return_labels=True)
+    dataset_train_cleaned_1channel_data = PVDataset(train_cleaned_1channel_data, channels=[[0]]*(len(train_cleaned_1channel_data)+len(train_cleaned_7channel_data)), 
+                                                    scale=1, return_labels=True, transform=train_transforms)
+    dataset_temp_cleaned_1channel_data   = PVDataset(temp_cleaned_1channel_data, channels=[[0]]*(len(temp_cleaned_1channel_data)+len(temp_cleaned_7channel_data)), 
+                                                     scale=1, return_labels=True, transform=val_transforms)
+    dataset_train_cleaned_7channel_data = PVDataset(train_cleaned_7channel_data, channels=[channels]*len(train_cleaned_7channel_data), 
+                                                    scale=1, return_labels=True, transform=train_transforms)
+    dataset_temp_cleaned_7channel_data   = PVDataset(temp_cleaned_7channel_data, channels=[channels]*len(temp_cleaned_7channel_data),   
+                                                     scale=1, return_labels=True, transform=val_transforms)
 
     batch_size = args.batch_size
 

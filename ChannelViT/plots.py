@@ -270,10 +270,10 @@ def find_agreement_indices(true_labels, predlabels):
 
 
 def plot_samples_from_specific_label_with_acc(ds_val, predlabels, label_to_filter, class_accuracies, correct=True, data_name='Unknown', outfolder='./Data', certainty=None):
-    empty_indices = [i for i, x in enumerate(predlabels) if not x]
-    predlabels = [x for i, x in enumerate(predlabels) if i not in empty_indices]
-    ds_val = [x for i, x in enumerate(ds_val) if i not in empty_indices]
-    certainty = [x for i, x in enumerate(certainty) if i not in empty_indices]
+    # empty_indices = [i for i, x in enumerate(predlabels) if not x]
+    # predlabels = [x for i, x in enumerate(predlabels) if i not in empty_indices]
+    # ds_val = [x for i, x in enumerate(ds_val) if i not in empty_indices]
+    # certainty = [x for i, x in enumerate(certainty) if i not in empty_indices]
 
     non_matching_indices = []
     matching_indices = []

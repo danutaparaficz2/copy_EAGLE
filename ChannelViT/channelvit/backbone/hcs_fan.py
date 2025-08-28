@@ -12,8 +12,8 @@ import torch.nn as nn
 import torch.utils.checkpoint as checkpoint
 from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 from timm.models.cait import ClassAttn
-from timm.models.helpers import build_model_with_cfg
-from timm.models.layers import DropPath, to_2tuple, trunc_normal_
+from timm.models import build_model_with_cfg
+from timm.layers import DropPath, to_2tuple, trunc_normal_
 from timm.models.vision_transformer import Mlp as MlpOri
 from timm.models.vision_transformer import _cfg
 

@@ -12,7 +12,8 @@ from utils import  (count_data_per_class, convert_labels_to_one_hot, label_names
 from plots import save_images_by_label
 from collections import defaultdict
 from torch.utils.data.dataloader import default_collate
-
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
 from tqdm import tqdm
 
 
@@ -505,14 +506,29 @@ class Load_Data_Handler_notlabeled:
         return mismatched_indices
 
 # Add this method to your Load_Data_Handler_notlabeled class
+def get_train_transforms():
+    return A.Compose([
+        A.HorizontalFlip(p=0.5),
+        A.VerticalFlip(p=0.5),
+        A.Rotate(limit=90, p=0.5),
+        A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.1, rotate_limit=15, p=0.5),
+        A.RandomBrightnessContrast(p=0.2),
+        ToTensorV2(), # Converts numpy to PyTorch tensor
+    ])
+
+def get_val_transforms():
+    return A.Compose([
+        ToTensorV2(),
+    ])
 
 class PVDataset(torch.utils.data.Dataset):
-    def __init__(self, df, channels, scale=1, return_labels=True):
+    def __init__(self, df, channels, scale=1, return_labels=True, transform=None):
         self.df = df
         self.channels = channels
 
         self.scale = scale
         self.return_labels = return_labels
+        self.transform = transform
 
 
     def __getitem__(self, idx):
@@ -527,7 +543,12 @@ class PVDataset(torch.utils.data.Dataset):
             img_chw *= self.scale
 
         self.channel = torch.tensor([c for c in self.channels[idx]])
-
+        # Apply the transformation if provided
+        if self.transform:
+            image = np.array(img_chw)
+            image = np.moveaxis(image, 0, -1)
+            transformed = self.transform(image=image)
+            img_chw = transformed['image']
         if self.return_labels:
             return {"images": img_chw, "labels": row[1], "channels": self.channel}
         else:

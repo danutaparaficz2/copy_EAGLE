@@ -3,7 +3,8 @@ from torch.utils.data.dataloader import default_collate
 from sklearn.model_selection import train_test_split
 from transformers import TrainingArguments, Trainer
 from plots import ploting_training_results
-from hubconf import camelyon_channelvit_small_p8_with_hcs_supervised, so2sat_channelvit_small_p8_with_hcs_random_split_supervised
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
 import torch
 from torch import nn
 import os
@@ -44,7 +45,9 @@ def custom_collate_fn(examples):
  #   images = {k: default_collate([example[k] for example in examples]) for k in examples[0] if k == 'images'}
 
     images = torch.stack([example['images'].float() for example in examples])
-    rest = {k: default_collate([torch.tensor(example[k]).int() for example in examples]) for k in examples[0] if k != 'images'}
+    # rest = {k: default_collate([torch.tensor(example[k]).int() for example in examples]) for k in examples[0] if k != 'images'}
+    rest = {k: default_collate([example[k].clone().detach().int() for example in examples]) for k in examples[0] if k != 'images'}
+
     return {'images': images, **rest}
     
 
@@ -62,9 +65,15 @@ def init_trainer(args, model, val_dataset, outfolder):
                                     save_total_limit=2,
                                     remove_unused_columns=False,
                                     push_to_hub=False,
-                                    metric_for_best_model='eval_accuracy',
-                                    load_best_model_at_end=True,
+                                    # metric_for_best_model='eval_accuracy',
                                     logging_dir='./logs',  # Directory for storing logs
+                                    lr_scheduler_type="cosine", # Add this line
+                                    warmup_ratio=0.1,
+                                    gradient_accumulation_steps=2, # Experiment with this value
+                                    load_best_model_at_end=True, # Add this
+                                    metric_for_best_model="f1",  # Choose your metric
+                                    greater_is_better=True,
+                                    # dataloader_num_workers=os.cpu_count() # <-- Add this line
                                     ) 
     trainer = CustomTrainer(
         model=model,
@@ -253,7 +262,7 @@ def retrain_resume_or_load_pretrained_second_stage(args, current_dir, input_mode
                 for param in block.parameters():
                     param.requires_grad = False
         # --- END OF NEW CODE FOR FREEZING ---
-        args.num_train_epochs = 107
+        args.num_train_epochs = 17
         trainer = init_trainer(args, model, concat_val, current_dir + output_model_folder + 'all_7channels_finetuned/')
 
         # Train the model with the 7-channel data
