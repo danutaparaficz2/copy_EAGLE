@@ -10,9 +10,9 @@ from sklearn.model_selection import train_test_split
 
 #### Local imports
 from training_multi_one_input_type import retrain_resume_or_load_pretrained_second_stage,retrain_resume_or_load_pretrained, init_trainer, train_save_model
-from load_data import PVDataset, get_train_transforms, get_val_transforms, just_transform, Load_Data_Handler_notlabeled
-from utils import (convert_list_of_arrays_to_labels, calculate_class_accuracy_one_hot,
-                    class_label_save, label_names, logits_to_classes)
+from load_data import PVDataset, get_train_transforms, get_val_transforms, just_transform, Load_Data_Handler_notlabeled, load_all_data_together
+from utils import (convert_list_of_arrays_to_labels, calculate_class_accuracy_one_hot, verify_data_normalization, check_raw_tensor_normalization, just_transform_with_norm,
+                    class_label_save, label_names, logits_to_classes, logits_to_classes_TISO,check_component_normalization, calculate_raw_data_means, calculate_per_channel_stats)
 from plots import (save_images_by_label, plot_multilabel_confusion_matrix,
                     plot_samples_from_all_labels_with_acc, ploting_training_results)
 from training_multi_one_input_type import load_post_trained_model
@@ -21,12 +21,12 @@ from training_multi_one_input_type import load_post_trained_model
 def parse_args():
     parser = argparse.ArgumentParser(description="Train and evaluate the model.")
     parser.add_argument('--num_train_epochs', type=int, default=16, help='Number of training epochs.')
-    parser.add_argument('--batch_size', type=int, default=5, help='Batch size for training and evaluation.')
+    parser.add_argument('--batch_size', type=int, default=13, help='Batch size for training and evaluation.')
     parser.add_argument('--retrain', type=str, default='predict_only', choices=['retrain', 'resume', 'predict_only'], help='Choose training mode: retrain, resume, or predict_only.')
     parser.add_argument('--use_only_EL', action='store_true', help='Use only EL images.')
     parser.add_argument('--all_colors', action='store_true', default=True, help='Use all available channels.')
     parser.add_argument('--num_classes', type=int, default=7, help='Number of classes.')     
-    parser.add_argument('--init_weights_name', type=str, default='so2sat_channelvit_small_p8_with_hcs_hard_split_supervised', help='Name of the initial weights file.')
+    parser.add_argument('--init_weights_name', type=str, default='imagenet_channelvit_small_p16_with_hcs_supervised', help='Name of the initial weights file.')
     
     args = parser.parse_args()
 
@@ -85,14 +85,42 @@ def load_all_data(config, args):
             filtered_data = pickle.load(f)
         print(f"Filtered data loaded from {filtered_data_path}")
     else:
+        load_all_data_together( config['current_dir'],  config['images_folder'], name_flag='rgb', args=args)
         raise FileNotFoundError(f"Filtered data not found at {filtered_data_path}. Please generate it first.")
-
+    # calculate_raw_data_means(filtered_data['data_Duramat_filtered_more'] , 'data_Duramat_filtered_more', sample_size=None)
+    # calculate_raw_data_means(filtered_data['data_Website_Ralf_filtered'] , 'data_Website_Ralf_filtered', sample_size=None)
+    # calculate_raw_data_means(filtered_data['data_Website_filtered'] , 'data_Website_filtered', sample_size=None)
     tensor_label_list_Duramat = just_transform(filtered_data['data_Duramat_filtered_more'], channels=[0])
     tensor_label_list_Infinity = just_transform(filtered_data['data_Infinity_filtered_more'], channels=[0], name='infinity')
-    tensor_label_list_Website = just_transform(filtered_data['data_Website_filtered'] + filtered_data['data_Website_Ralf_filtered'], channels=config['channels'])
+    calculated_mean, calculated_std = calculate_per_channel_stats(filtered_data['data_Website_filtered'] + filtered_data['data_Website_Ralf_filtered'])
+    tensor_label_list_Website = just_transform_with_norm(filtered_data['data_Website_filtered'] + filtered_data['data_Website_Ralf_filtered'], calculated_mean=calculated_mean, calculated_std=calculated_std)
+
+   # tensor_label_list_Website = just_transform(filtered_data['data_Website_filtered'] + filtered_data['data_Website_Ralf_filtered'], channels=config['channels'])
 
     cleaned_1channel_data = tensor_label_list_Duramat + tensor_label_list_Infinity
     cleaned_7channel_data = tensor_label_list_Website
+
+
+    # ADD RAW DATA NORMALIZATION CHECKS HERE
+    print("\n" + "="*80)
+    print("CHECKING RAW TENSOR DATA NORMALIZATION (BEFORE TRANSFORMS)")
+    print("="*80)
+    
+    # Check all raw tensor data
+    duramat_stats = check_raw_tensor_normalization(tensor_label_list_Duramat, "Duramat", check_all=True)
+    infinity_stats = check_raw_tensor_normalization(tensor_label_list_Infinity, "Infinity", check_all=True)  
+    website_stats = check_raw_tensor_normalization(tensor_label_list_Website, "Website", check_all=True)
+    
+    print("\n" + "="*60)
+    print("RAW DATA SUMMARY:")
+    print("="*60)
+    if duramat_stats:
+        print(f"Duramat:  mean={duramat_stats['mean']:.4f}, std={duramat_stats['std']:.4f}, range=[{duramat_stats['min']:.2f}, {duramat_stats['max']:.2f}] - {duramat_stats['assessment']}")
+    if infinity_stats:
+        print(f"Infinity: mean={infinity_stats['mean']:.4f}, std={infinity_stats['std']:.4f}, range=[{infinity_stats['min']:.2f}, {infinity_stats['max']:.2f}] - {infinity_stats['assessment']}")
+    if website_stats:
+        print(f"Website:  mean={website_stats['mean']:.4f}, std={website_stats['std']:.4f}, range=[{website_stats['min']:.2f}, {website_stats['max']:.2f}] - {website_stats['assessment']}")
+    print("="*80)
 
     train_1channel_data, val_1channel_data = train_test_split(cleaned_1channel_data, test_size=0.2, random_state=42)
     train_7channel_data, val_7channel_data = train_test_split(cleaned_7channel_data, test_size=0.3, random_state=42)
@@ -108,6 +136,39 @@ def load_all_data(config, args):
     dataset_train_7channel = PVDataset(train_7channel_data, channels=[config['channels']] * len(train_7channel_data), scale=1, return_labels=True, transform=train_transforms)
     dataset_val_7channel = PVDataset(val_7channel_data, channels=[config['channels']] * len(val_7channel_data), scale=1, return_labels=True, transform=val_transforms)
 
+
+    # ADD NORMALIZATION CHECKS HERE
+    print("\n" + "="*80)
+    print("CHECKING DATA NORMALIZATION")
+    print("="*80)
+    
+    # Check 1-channel training data
+    print("\n--- 1-Channel Training Data ---")
+    results_1ch_train = verify_data_normalization(dataset_train_1channel, sample_size=50, verbose=True)
+    
+    # Check 1-channel validation data
+    print("\n--- 1-Channel Validation Data ---")
+    results_1ch_val = verify_data_normalization(dataset_val_1channel, sample_size=30, verbose=True)
+    
+    # Check 7-channel training data
+    print("\n--- 7-Channel Training Data ---")
+    results_7ch_train = verify_data_normalization(dataset_train_7channel, sample_size=50, verbose=True)
+    
+    # Check 7-channel validation data
+    print("\n--- 7-Channel Validation Data ---")
+    results_7ch_val = verify_data_normalization(dataset_val_7channel, sample_size=30, verbose=True)
+    
+    # Stop execution if normalization is wrong
+    all_results = [results_1ch_train, results_1ch_val, results_7ch_train, results_7ch_val]
+    if not all(r['mean_ok'] and r['std_ok'] for r in all_results):
+        print("\n⚠️  WARNING: Data normalization issues detected!")
+        print("Please check your data preprocessing and transforms.")
+        # Uncomment to stop execution:
+        # return
+    else:
+        print("\n✅ All datasets passed normalization check!")
+    
+    print("="*80)
     return dataset_train_1channel, dataset_val_1channel, dataset_train_7channel, dataset_val_7channel
 
 
@@ -159,6 +220,12 @@ def main():
     # First Stage: 1-channel data training
     dataset_train_1channel, dataset_val_1channel, dataset_train_7channel, dataset_val_7channel = load_all_data(config, args)
 
+
+    # ADD THESE LINES HERE
+    if torch.backends.mps.is_available():
+        print(f"Using device: {torch.device('mps')}")
+    else:
+        print(f"Using device: {torch.device('cpu')}")
     print("\n----------------- STAGE 1: TRAINING ON 1-CHANNEL DATA -----------------")
     trainer = retrain_resume_or_load_pretrained(
         args, 
@@ -176,7 +243,8 @@ def main():
     
     # Second Stage: 7-channel data fine-tuning
     print("\n----------------- STAGE 2: FINE-TUNING ON 7-CHANNEL DATA -----------------")
-    args.retrain = 'retrain'
+    # args.retrain = 'retrain'
+    args.batch_size = 3
     trainer_7channel = retrain_resume_or_load_pretrained_second_stage(
         args, 
         config['current_dir'], 
@@ -194,7 +262,7 @@ def main():
     print("\n----------------- PREDICTION ON UNLABELED DATA -----------------")
     
     # --- TISO DATA ---
-    data_tiso_path = os.path.join(config['current_dir'], f'Data/processed_notlabeled_TISO_{config["name_flag"]}.pth')
+    data_tiso_path = os.path.join(config['current_dir'], f'Data/processed_notlabeled_TISOn_{config["name_flag"]}.pth')
     if os.path.exists(data_tiso_path):
         with open(data_tiso_path, 'rb') as f:
             data = torch.load(f)
@@ -202,16 +270,22 @@ def main():
     else:
         data_loader = Load_Data_Handler_notlabeled(config['path_Website'], args, 'TISO')
         data_TISO_notlabeled_raw, _ = data_loader.get_data()
-        data_TISO_notlabeled = just_transform(data_TISO_notlabeled_raw, channels=config['channels'], notlabeled=True)
+        calculated_mean, calculated_std = calculate_per_channel_stats(data_TISO_notlabeled_raw)
+        data_TISO_notlabeled = just_transform_with_norm(data_TISO_notlabeled_raw, calculated_mean=calculated_mean, calculated_std=calculated_std)
+
+        # data_TISO_notlabeled = just_transform(data_TISO_notlabeled_raw, channels=config['channels'], notlabeled=True)
         with open(data_tiso_path, 'wb') as f:
             torch.save({'data_TISO_notlabeled_small': data_TISO_notlabeled}, f)
+            print(f"Saved TISO not labeled data to {data_tiso_path}")
+    TISO_stats = check_raw_tensor_normalization(data_TISO_notlabeled, "Website", check_all=True)
+    print(f"Website:  mean={TISO_stats['mean']:.4f}, std={TISO_stats['std']:.4f}, range=[{TISO_stats['min']:.2f}, {TISO_stats['max']:.2f}] - {TISO_stats['assessment']}")
 
     dataset_tiso_notlabeled = PVDataset(data_TISO_notlabeled, channels=[config['channels']] * len(data_TISO_notlabeled), scale=1, return_labels=True)
     predictions_tiso = trainer_7channel.predict(dataset_tiso_notlabeled) 
-    pred_labels_tiso = logits_to_classes(predictions_tiso, initial_threshold=0.9)
+    pred_labels_tiso = logits_to_classes_TISO(predictions_tiso, initial_threshold=0.9)
     predlabels_tiso = convert_list_of_arrays_to_labels(pred_labels_tiso)
-    save_images_by_label(data_TISO_notlabeled, predlabels_tiso, os.path.join(config['images_folder'], 'data_TISO_notlabeled_good/'), flag='Website', name_flag=config['name_flag'])
-
+    save_images_by_label(data_TISO_notlabeled, predlabels_tiso, os.path.join(config['images_folder'], 'data_TISO_notlabeled_good_new2/'), flag='Website', name_flag=config['name_flag'])
+    exit()
     # --- C14 DATA ---
     data_c14_path = os.path.join(config['current_dir'], f'Data/processed_notlabeled_C14_{config["name_flag"]}.pth')
     if os.path.exists(data_c14_path):

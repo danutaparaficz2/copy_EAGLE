@@ -512,7 +512,7 @@ def get_train_transforms():
         A.VerticalFlip(p=0.5),
         A.Rotate(limit=90, p=0.5),
         A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.1, rotate_limit=15, p=0.5),
-        A.RandomBrightnessContrast(p=0.2),
+        # A.RandomBrightnessContrast(p=0.2),  ## TODO try this!!
         ToTensorV2(), # Converts numpy to PyTorch tensor
     ])
 
@@ -693,7 +693,7 @@ def load_all_data_together(current_dir, images_folder, name_flag='rgb', args=Non
             torch.save(
                 {'data_Website_Ebrar': data_Website, 'data_Website_Ralf': data_Website_Ralf, 'data_Duramat': data_Duramat, 'data_Infinity': data_Infinity},
                 f)
-    return data_Website, data_Website_Ralf, data_Duramat, data_Infinity
+    return {'data_Website_Ebrar': data_Website, 'data_Website_Ralf': data_Website_Ralf, 'data_Duramat': data_Duramat, 'data_Infinity': data_Infinity}
     
 def find_outliers(datasetdata, device, folder, trainer, threshold=5.0):
 

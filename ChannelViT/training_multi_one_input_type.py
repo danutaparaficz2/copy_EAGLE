@@ -9,7 +9,7 @@ import torch
 from torch import nn
 import os
 from channelvit.backbone.hcs_channel_vit import hcs_channelvit_small
-
+import numpy as np
 # My libraries
 from load_data import  PVDataset
 from utils import compute_metrics_sigmoid, augment_underrepresented_classes
@@ -42,12 +42,23 @@ class CustomTrainer(Trainer):
     
 # we need to collate the data to be able to use multiple inputs images and labels and channels
 def custom_collate_fn(examples):
- #   images = {k: default_collate([example[k] for example in examples]) for k in examples[0] if k == 'images'}
-
     images = torch.stack([example['images'].float() for example in examples])
-    # rest = {k: default_collate([torch.tensor(example[k]).int() for example in examples]) for k in examples[0] if k != 'images'}
-    rest = {k: default_collate([example[k].clone().detach().int() for example in examples]) for k in examples[0] if k != 'images'}
-
+    rest = {}
+    for k in examples[0]:
+        if k == 'images':
+            continue
+        items = []
+        for example in examples:
+            item = example[k]
+            if isinstance(item, torch.Tensor):
+                items.append(item.clone().detach().int())
+            elif isinstance(item, np.ndarray):
+                items.append(torch.tensor(item).int())
+            elif isinstance(item, list):
+                items.append(torch.tensor(item).int())
+            else:
+                items.append(torch.tensor(item).int())
+        rest[k] = default_collate(items)
     return {'images': images, **rest}
     
 
@@ -59,7 +70,7 @@ def init_trainer(args, model, val_dataset, outfolder):
                                     evaluation_strategy='epoch',
                                     save_strategy='epoch',
                                     num_train_epochs=args.num_train_epochs,
-                                    fp16=True if torch.cuda.is_available() else False,
+                                    fp16=False if torch.backends.mps.is_available() else False,
                                     logging_steps= args.batch_size,
                                     learning_rate=1e-5,
                                     save_total_limit=2,
@@ -69,7 +80,7 @@ def init_trainer(args, model, val_dataset, outfolder):
                                     logging_dir='./logs',  # Directory for storing logs
                                     lr_scheduler_type="cosine", # Add this line
                                     warmup_ratio=0.1,
-                                    gradient_accumulation_steps=2, # Experiment with this value
+                                    gradient_accumulation_steps=5, # Experiment with this value
                                     load_best_model_at_end=True, # Add this
                                     metric_for_best_model="f1",  # Choose your metric
                                     greater_is_better=True,
@@ -169,7 +180,9 @@ def retrain_resume_or_load_pretrained_second_stage(args, current_dir, input_mode
             trainer,
             concat_train,   # train_dataset (should be your ConcatDataset)
             concat_val,     # val_dataset (should be your ConcatDataset)
-            current_dir+output_model_folder
+            current_dir+output_model_folder,
+            
+
         )
 
 
@@ -253,16 +266,16 @@ def retrain_resume_or_load_pretrained_second_stage(args, current_dir, input_mode
         model = load_post_trained_model(args, current_dir+output_model_folder, device, 'trained_state_dict', args.num_classes)
         # Initialize the trainer for the second stage
         # Freeze the patch embedding layer
-        for param in model.patch_embed.parameters():
-            param.requires_grad = False
+        # for param in model.patch_embed.parameters():
+        #     param.requires_grad = False
 
-        # Freeze the first few blocks (e.g., first 4 out of 12 for ViT-Small)
-        for i, block in enumerate(model.blocks):
-            if i < 4:  # Adjust this number to control how many blocks to freeze
-                for param in block.parameters():
-                    param.requires_grad = False
+        # # Freeze the first few blocks (e.g., first 4 out of 12 for ViT-Small)
+        # for i, block in enumerate(model.blocks):
+        #     if i < 6:  # Adjust this number to control how many blocks to freeze
+        #         for param in block.parameters():
+        #             param.requires_grad = False
         # --- END OF NEW CODE FOR FREEZING ---
-        args.num_train_epochs = 17
+        args.num_train_epochs = 140
         trainer = init_trainer(args, model, concat_val, current_dir + output_model_folder + 'all_7channels_finetuned/')
 
         # Train the model with the 7-channel data
