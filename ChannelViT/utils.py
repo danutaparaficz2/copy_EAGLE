@@ -1281,3 +1281,43 @@ def just_transform_with_norm(data, calculated_mean, calculated_std, resize_to=(2
         labels.append(label)
 
     return list(zip(tensors, labels))
+
+
+
+
+def just_transform_with_norm_without_label(data, calculated_mean, calculated_std, resize_to=(224, 224)):
+    """
+    Transform and normalize multi-channel images (e.g., 7-channel Website data).
+    Applies resizing and normalization directly to tensors.
+    """
+    from torchvision.transforms.functional import resize
+
+    tensors = []
+    for img in tqdm(data, desc="Normalizing images"):
+        # Convert to float tensor and permute to (C, H, W)
+        if isinstance(img, np.ndarray):
+            if img.ndim == 3 and img.shape[-1] == len(calculated_mean):
+                img_tensor = torch.tensor(img, dtype=torch.float32).permute(2, 0, 1)
+            elif img.ndim == 2:
+                img_tensor = torch.tensor(img, dtype=torch.float32).unsqueeze(0)
+            else:
+                img_tensor = torch.tensor(img, dtype=torch.float32)
+        else:
+            img_tensor = img.float()
+
+        # Resize each channel separately and stack
+        resized_channels = []
+        for c in range(img_tensor.shape[0]):
+            channel = img_tensor[c, :, :].unsqueeze(0)  # (1, H, W)
+            channel_resized = resize(channel, resize_to)  # (1, resize_to[0], resize_to[1])
+            resized_channels.append(channel_resized)
+        img_tensor_resized = torch.cat(resized_channels, dim=0)  # (C, H, W)
+
+        # Normalize: (x - mean) / std for each channel
+        mean = torch.tensor(calculated_mean, dtype=torch.float32).view(-1, 1, 1)
+        std = torch.tensor(calculated_std, dtype=torch.float32).view(-1, 1, 1)
+        img_tensor_norm = (img_tensor_resized/255. - mean) / std
+
+        tensors.append(img_tensor_norm)
+
+    return list(tensors)

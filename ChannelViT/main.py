@@ -12,7 +12,7 @@ from sklearn.model_selection import train_test_split
 from training_multi_one_input_type import retrain_resume_or_load_pretrained_second_stage,retrain_resume_or_load_pretrained, init_trainer, train_save_model
 from load_data import PVDataset, get_train_transforms, get_val_transforms, just_transform, Load_Data_Handler_notlabeled, load_all_data_together
 from utils import (convert_list_of_arrays_to_labels, calculate_class_accuracy_one_hot, verify_data_normalization, check_raw_tensor_normalization, just_transform_with_norm,
-                    class_label_save, label_names, logits_to_classes, logits_to_classes_TISO,check_component_normalization, calculate_raw_data_means, calculate_per_channel_stats)
+                    class_label_save, label_names, logits_to_classes, logits_to_classes_TISO, just_transform_with_norm_without_label, check_component_normalization, calculate_raw_data_means, calculate_per_channel_stats)
 from plots import (save_images_by_label, plot_multilabel_confusion_matrix,
                     plot_samples_from_all_labels_with_acc, ploting_training_results)
 from training_multi_one_input_type import load_post_trained_model
@@ -260,7 +260,7 @@ def main():
     
     # Final Prediction on unlabeled data
     print("\n----------------- PREDICTION ON UNLABELED DATA -----------------")
-    
+    exit()
     # --- TISO DATA ---
     data_tiso_path = os.path.join(config['current_dir'], f'Data/processed_notlabeled_TISOn_{config["name_flag"]}.pth')
     if os.path.exists(data_tiso_path):
@@ -271,7 +271,7 @@ def main():
         data_loader = Load_Data_Handler_notlabeled(config['path_Website'], args, 'TISO')
         data_TISO_notlabeled_raw, _ = data_loader.get_data()
         calculated_mean, calculated_std = calculate_per_channel_stats(data_TISO_notlabeled_raw)
-        data_TISO_notlabeled = just_transform_with_norm(data_TISO_notlabeled_raw, calculated_mean=calculated_mean, calculated_std=calculated_std)
+        data_TISO_notlabeled = just_transform_with_norm_without_label(data_TISO_notlabeled_raw, calculated_mean=calculated_mean, calculated_std=calculated_std)
 
         # data_TISO_notlabeled = just_transform(data_TISO_notlabeled_raw, channels=config['channels'], notlabeled=True)
         with open(data_tiso_path, 'wb') as f:
