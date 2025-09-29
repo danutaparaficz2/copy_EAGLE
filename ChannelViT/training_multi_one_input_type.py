@@ -227,8 +227,6 @@ def retrain_resume_or_load_pretrained(args, current_dir, input_model_folder, dev
             concat_val,     # val_dataset (should be your ConcatDataset)
             current_dir+output_model_folder
         )
-
-
         ploting_training_results(trainer, current_dir+output_model_folder)
     elif args.retrain == 'resume':
         model = load_model(args, current_dir+input_model_folder, device, args.init_weights_name, args.num_classes)

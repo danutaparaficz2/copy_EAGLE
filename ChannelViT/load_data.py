@@ -543,12 +543,14 @@ class PVDataset(torch.utils.data.Dataset):
             img_chw *= self.scale
 
         self.channel = torch.tensor([c for c in self.channels[idx]])
+
         # Apply the transformation if provided
         if self.transform:
             image = np.array(img_chw)
             image = np.moveaxis(image, 0, -1)
             transformed = self.transform(image=image)
             img_chw = transformed['image']
+            
         if self.return_labels:
             return {"images": img_chw, "labels": row[1], "channels": self.channel}
         else:

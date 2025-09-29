@@ -22,12 +22,15 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train and evaluate the model.")
     parser.add_argument('--num_train_epochs', type=int, default=16, help='Number of training epochs.')
     parser.add_argument('--batch_size', type=int, default=13, help='Batch size for training and evaluation.')
-    parser.add_argument('--retrain', type=str, default='predict_only', choices=['retrain', 'resume', 'predict_only'], help='Choose training mode: retrain, resume, or predict_only.')
+    #parser.add_argument('--retrain', type=str, default='predict_only', choices=['retrain', 'resume', 'predict_only'], help='Choose training mode: retrain, resume, or predict_only.')
+    parser.add_argument('--retrain', type=str, default='retrain_second_stage', choices=['retrain', 'retrain_second_stage', 'resume', 'predict_only'],
+                        help='Choose training mode: retrain, resume, or predict_only.')
     parser.add_argument('--use_only_EL', action='store_true', help='Use only EL images.')
     parser.add_argument('--all_colors', action='store_true', default=True, help='Use all available channels.')
     parser.add_argument('--num_classes', type=int, default=7, help='Number of classes.')     
     parser.add_argument('--init_weights_name', type=str, default='imagenet_channelvit_small_p16_with_hcs_supervised', help='Name of the initial weights file.')
-    
+    parser.add_argument('--seed', type=int, default=15, help='Random seed for reproducibility.')
+    #parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
     args = parser.parse_args()
 
     def extract_number_from_name(name):
@@ -122,8 +125,8 @@ def load_all_data(config, args):
         print(f"Website:  mean={website_stats['mean']:.4f}, std={website_stats['std']:.4f}, range=[{website_stats['min']:.2f}, {website_stats['max']:.2f}] - {website_stats['assessment']}")
     print("="*80)
 
-    train_1channel_data, val_1channel_data = train_test_split(cleaned_1channel_data, test_size=0.2, random_state=42)
-    train_7channel_data, val_7channel_data = train_test_split(cleaned_7channel_data, test_size=0.3, random_state=42)
+    train_1channel_data, val_1channel_data = train_test_split(cleaned_1channel_data, test_size=0.2, random_state=args.seed)
+    train_7channel_data, val_7channel_data = train_test_split(cleaned_7channel_data, test_size=0.3, random_state=args.seed)
     
     print(f"Loaded {len(cleaned_1channel_data)} one-channel samples and {len(cleaned_7channel_data)} seven-channel samples.")
     print(f"Splits: 1-channel (Train: {len(train_1channel_data)}, Val: {len(val_1channel_data)}), 7-channel (Train: {len(train_7channel_data)}, Val: {len(val_7channel_data)})")
@@ -190,9 +193,12 @@ def run_predictions(trainer, dataset, dataset_name, out_folder, args, threshold=
     dataset_filtered = [item for i, item in enumerate(dataset) if i not in empty_indices]
     true_labels = np.array([item['labels'] for item in dataset_filtered])
 
-    class_names = label_names()
+    
     
     if len(true_labels) > 0:
+        save_predictions(true_labels, pred_labels, args.seed, dataset_name)
+        '''
+        class_names = label_names()
         plot_multilabel_confusion_matrix(true_labels, pred_labels, class_names, output_path=os.path.join(out_folder, f'{dataset_name}_confusion_matrix.png'))
         
         print('################# ACCURACIES #################')
@@ -201,10 +207,23 @@ def run_predictions(trainer, dataset, dataset_name, out_folder, args, threshold=
             label_name, class_accuracies[label], length = calculate_class_accuracy_one_hot(true_labels, pred_labels, class_label=label)
             print(f"Class '{label_name}': accuracy={class_accuracies[label]:.2f}, count={length}")
 
-        plot_samples_from_all_labels_with_acc(dataset_filtered, predlabels, class_accuracies, data_name=dataset_name, 
-                                            outfolder=out_folder, certainty=torch.sigmoid(torch.tensor(predictions[0])).numpy())
+        #plot_samples_from_all_labels_with_acc(dataset_filtered, predlabels, class_accuracies, data_name=dataset_name, 
+        #                                    outfolder=out_folder, certainty=torch.sigmoid(torch.tensor(predictions[0])).numpy())
+        '''
     else:
         print(f"No samples left for evaluation after filtering. Skipping plots.")
+
+
+def save_predictions(true_labels, pred_labels, seed, data_name):
+    os.makedirs('results', exist_ok=True)
+    save_path = f'results/{data_name}_{seed}.pkl'
+    with open(save_path, 'wb') as f:
+        pickle.dump({
+            'pred_labels': pred_labels,
+            'true_labels': true_labels
+        }, f)
+    print(f"Saved predictions and true labels to {save_path}")
+
 
 def main():
     warnings.filterwarnings("ignore", category=UserWarning)
@@ -227,6 +246,9 @@ def main():
     else:
         print(f"Using device: {torch.device('cpu')}")
     print("\n----------------- STAGE 1: TRAINING ON 1-CHANNEL DATA -----------------")
+    retrain = args.retrain
+    if retrain == 'retrain_second_stage':
+        args.retrain = 'predict_only'  # Skip first stage if only second stage retraining is desired
     trainer = retrain_resume_or_load_pretrained(
         args, 
         config['current_dir'], 
@@ -239,11 +261,12 @@ def main():
         name_flag=config['name_flag'] + 'Duramat'
     )
     
-    run_predictions(trainer, dataset_val_1channel, '1-Channel_Validation', config['images_folder'], args)
+    #run_predictions(trainer, dataset_val_1channel, '1-Channel_Validation', config['images_folder'], args)
     
     # Second Stage: 7-channel data fine-tuning
     print("\n----------------- STAGE 2: FINE-TUNING ON 7-CHANNEL DATA -----------------")
-    # args.retrain = 'retrain'
+    if retrain == 'retrain_second_stage':
+        args.retrain = 'retrain'
     args.batch_size = 3
     trainer_7channel = retrain_resume_or_load_pretrained_second_stage(
         args, 
@@ -258,6 +281,7 @@ def main():
     # Run predictions on the 7-channel validation set
     run_predictions(trainer_7channel, dataset_val_7channel, '7-Channel_Validation', config['images_folder'], args)
     
+'''   
     # Final Prediction on unlabeled data
     print("\n----------------- PREDICTION ON UNLABELED DATA -----------------")
     # exit()
@@ -286,11 +310,13 @@ def main():
                                         scale=1, return_labels=True)
     predictions_tiso = trainer_7channel.predict(dataset_tiso_notlabeled) 
     pred_labels_tiso = logits_to_classes_TISO(predictions_tiso, initial_threshold=0.9)
-    predlabels_tiso = convert_list_of_arrays_to_labels(pred_labels_tiso)
-    save_images_by_label(data_TISO_notlabeled, predlabels_tiso, 
-                         os.path.join(config['images_folder'], 'data_TISO_notlabeled_good_new2/'), 
-                         flag='Website', name_flag=config['name_flag'])
-    exit()
+    #predlabels_tiso = convert_list_of_arrays_to_labels(pred_labels_tiso)
+    #save_images_by_label(data_TISO_notlabeled, predlabels_tiso, 
+    #                     os.path.join(config['images_folder'], 'data_TISO_notlabeled_good_new2/'), 
+    #                     flag='Website', name_flag=config['name_flag'])
+    #exit()
+    save_predictions(predictions_tiso, pred_labels_tiso, args.seed, 'tiso')
+
     # --- C14 DATA ---
     print("\n--- C14 DATA ---")
     data_c14_path = os.path.join(config['current_dir'], f'Data/processed_notlabeled_C14_{config["name_flag"]}.pth')
@@ -308,10 +334,12 @@ def main():
     dataset_c14_notlabeled = PVDataset(data_C14_notlabeled, channels=[config['channels']] * len(data_C14_notlabeled), scale=1, return_labels=True)
     predictions_c14 = trainer_7channel.predict(dataset_c14_notlabeled) 
     pred_labels_c14 = logits_to_classes(predictions_c14)
-    predlabels_c14 = convert_list_of_arrays_to_labels(pred_labels_c14)
-    save_images_by_label(data_C14_notlabeled, predlabels_c14, 
-                         os.path.join(config['images_folder'], 'data_C14_notlabeled_good/'), 
-                         flag='Website', name_flag=config['name_flag'])
+    #predlabels_c14 = convert_list_of_arrays_to_labels(pred_labels_c14)
+    #save_images_by_label(data_C14_notlabeled, predlabels_c14, 
+    #                     os.path.join(config['images_folder'], 'data_C14_notlabeled_good/'), 
+    #                     flag='Website', name_flag=config['name_flag'])
+
+    save_predictions(predictions_c14, pred_labels_c14, args.seed, 'c14')
 
     # --- INFINITY DATA ---
     print("\n--- INFINITY DATA ---")
@@ -330,10 +358,12 @@ def main():
     dataset_infinity_notlabeled = PVDataset(data_Infinity_notlabeled, channels=[config['channels']] * len(data_Infinity_notlabeled), scale=1, return_labels=True)
     predictions_infinity = trainer_7channel.predict(dataset_infinity_notlabeled) 
     pred_labels_infinity = logits_to_classes(predictions_infinity)
-    predlabels_infinity = convert_list_of_arrays_to_labels(pred_labels_infinity)
-    save_images_by_label(data_Infinity_notlabeled, predlabels_infinity, 
-                         os.path.join(config['images_folder'], 'data_Infinity_notlabeled_good/'), 
-                         flag='Website', name_flag=config['name_flag'])
+    #predlabels_infinity = convert_list_of_arrays_to_labels(pred_labels_infinity)
+    #save_images_by_label(data_Infinity_notlabeled, predlabels_infinity, 
+    #                     os.path.join(config['images_folder'], 'data_Infinity_notlabeled_good/'), 
+    #                     flag='Website', name_flag=config['name_flag'])
+    save_predictions(predictions_infinity, pred_labels_infinity, args.seed, 'infinity')
+''' 
 
 
 if __name__ == '__main__':

@@ -830,27 +830,33 @@ def check_transform_normalization(transform, sample_image):
 def check_raw_tensor_normalization(tensor_data_list, data_name, check_all=True):
     """
     Check normalization of raw tensor data before transforms
-    
+
     Args:
-        tensor_data_list: List of (tensor, label) tuples
+        tensor_data_list: List of (tensor, label) tuples, (tensor,) tuples, or just tensors
         data_name: Name for printing
         check_all: If True, check all data; if False, sample
     """
     print(f"\n--- Checking Raw {data_name} Data Normalization ---")
-    
+
     if not tensor_data_list:
         print(f"No data in {data_name}")
         return
-    
+
     all_tensors = []
-    
+
     # Process all data or sample
     data_to_check = tensor_data_list if check_all else tensor_data_list[:min(100, len(tensor_data_list))]
-    
-    for i, (tensor, label) in enumerate(data_to_check):
+
+    for i, entry in enumerate(data_to_check):
         if i % 1000 == 0 and i > 0:  # Progress indicator for large datasets
             print(f"  Processed {i}/{len(data_to_check)} samples...")
-            
+
+        # Accept (tensor, label), (tensor,), or tensor
+        if isinstance(entry, tuple):
+            tensor = entry[0]
+        else:
+            tensor = entry
+
         # Handle different tensor shapes
         if len(tensor.shape) == 2:  # (H, W)
             tensor = tensor.unsqueeze(0)  # Add channel dimension -> (1, H, W)
@@ -859,13 +865,13 @@ def check_raw_tensor_normalization(tensor_data_list, data_name, check_all=True):
         else:
             print(f"  Warning: Unexpected tensor shape {tensor.shape} at index {i}")
             continue
-            
+
         all_tensors.append(tensor.float())
-    
+
     if not all_tensors:
         print(f"  No valid tensors found in {data_name}")
         return
-    
+
     # Stack all tensors
     try:
         all_data = torch.stack(all_tensors)
@@ -875,30 +881,30 @@ def check_raw_tensor_normalization(tensor_data_list, data_name, check_all=True):
         # Try with different approach - flatten and check
         flattened_data = torch.cat([t.flatten() for t in all_tensors])
         all_data = flattened_data.view(-1, 1, 1, 1)  # Reshape for consistent processing
-    
+
     # Calculate statistics
     overall_mean = all_data.mean().item()
     overall_std = all_data.std().item()
     overall_min = all_data.min().item()
     overall_max = all_data.max().item()
-    
+
     # Per-channel statistics
     num_channels = all_data.shape[1]
     print(f"  Total samples: {all_data.shape[0]}")
     print(f"  Number of channels: {num_channels}")
     print(f"  Data type: {all_data.dtype}")
-    
+
     print(f"\n  Overall Statistics:")
     print(f"    Mean: {overall_mean:.6f}")
     print(f"    Std:  {overall_std:.6f}")
     print(f"    Min:  {overall_min:.6f}")
     print(f"    Max:  {overall_max:.6f}")
     print(f"    Range: [{overall_min:.6f}, {overall_max:.6f}]")
-    
+
     # Check if data looks normalized
     mean_ok = abs(overall_mean) < 0.1
     std_ok = abs(overall_std - 1.0) < 0.2  # More lenient for raw data
-    
+
     if num_channels > 1:
         print(f"\n  Per-Channel Statistics:")
         for c in range(num_channels):
@@ -908,7 +914,7 @@ def check_raw_tensor_normalization(tensor_data_list, data_name, check_all=True):
             ch_min = channel_data.min().item()
             ch_max = channel_data.max().item()
             print(f"    Channel {c}: mean={ch_mean:.6f}, std={ch_std:.6f}, range=[{ch_min:.4f}, {ch_max:.4f}]")
-    
+
     # Provide assessment
     if overall_min >= 0 and overall_max <= 1:
         print(f"  ✓ Data appears to be in [0, 1] range")
@@ -918,7 +924,7 @@ def check_raw_tensor_normalization(tensor_data_list, data_name, check_all=True):
         print(f"  ✓ Data appears to be normalized (mean≈0, std≈1)")
     else:
         print(f"  ⚠ Data may need normalization")
-    
+
     return {
         'mean': overall_mean,
         'std': overall_std,
@@ -1304,6 +1310,8 @@ def just_transform_with_norm_without_label(data, calculated_mean, calculated_std
                 img_tensor = torch.tensor(img, dtype=torch.float32)
         else:
             img_tensor = img.float()
+
+
 
         # Resize each channel separately and stack
         resized_channels = []
