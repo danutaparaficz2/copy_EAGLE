@@ -7,6 +7,7 @@ import numpy as np
 import pickle
 import json
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report
 
 #### Local imports
 from training_multi_one_input_type import retrain_resume_or_load_pretrained_second_stage,retrain_resume_or_load_pretrained, init_trainer, train_save_model
@@ -179,7 +180,7 @@ def run_predictions(trainer, dataset, dataset_name, out_folder, args, threshold=
         return
 
     predictions = trainer.predict(dataset) 
-    pred_labels = logits_to_classes(predictions, initial_threshold=threshold)
+    pred_labels, _ = logits_to_classes(predictions, initial_threshold=threshold)
     predlabels = convert_list_of_arrays_to_labels(pred_labels)
 
     empty_indices = [i for i, x in enumerate(predlabels) if not x]
@@ -193,16 +194,21 @@ def run_predictions(trainer, dataset, dataset_name, out_folder, args, threshold=
     class_names = label_names()
     
     if len(true_labels) > 0:
-        plot_multilabel_confusion_matrix(true_labels, pred_labels, class_names, output_path=os.path.join(out_folder, f'{dataset_name}_confusion_matrix.png'))
+        for col in range(args.num_classes):
+            col_preds = np.array(pred_labels)[:, col]
+            col_trues = true_labels[:, col]
+            print(f"  Column {col}:")
+            print("    Accuracy:", accuracy_score(col_trues, col_preds))
+        # plot_multilabel_confusion_matrix(true_labels, pred_labels, class_names, output_path=os.path.join(out_folder, f'{dataset_name}_confusion_matrix.png'))
         
-        print('################# ACCURACIES #################')
+        # print('################# ACCURACIES #################')
         class_accuracies = {}
         for label in range(args.num_classes):
             label_name, class_accuracies[label], length = calculate_class_accuracy_one_hot(true_labels, pred_labels, class_label=label)
             print(f"Class '{label_name}': accuracy={class_accuracies[label]:.2f}, count={length}")
 
-        plot_samples_from_all_labels_with_acc(dataset_filtered, predlabels, class_accuracies, data_name=dataset_name, 
-                                            outfolder=out_folder, certainty=torch.sigmoid(torch.tensor(predictions[0])).numpy())
+        # plot_samples_from_all_labels_with_acc(dataset_filtered, predlabels, class_accuracies, data_name=dataset_name, 
+        #                                     outfolder=out_folder, certainty=torch.sigmoid(torch.tensor(predictions[0])).numpy())
     else:
         print(f"No samples left for evaluation after filtering. Skipping plots.")
 
@@ -243,7 +249,7 @@ def main():
     
     # Second Stage: 7-channel data fine-tuning
     print("\n----------------- STAGE 2: FINE-TUNING ON 7-CHANNEL DATA -----------------")
-    # args.retrain = 'retrain'
+    args.retrain = 'retrain'
     args.batch_size = 3
     trainer_7channel = retrain_resume_or_load_pretrained_second_stage(
         args, 
@@ -307,7 +313,7 @@ def main():
 
     dataset_c14_notlabeled = PVDataset(data_C14_notlabeled, channels=[config['channels']] * len(data_C14_notlabeled), scale=1, return_labels=True)
     predictions_c14 = trainer_7channel.predict(dataset_c14_notlabeled) 
-    pred_labels_c14 = logits_to_classes(predictions_c14)
+    pred_labels_c14, _ = logits_to_classes(predictions_c14)
     predlabels_c14 = convert_list_of_arrays_to_labels(pred_labels_c14)
     save_images_by_label(data_C14_notlabeled, predlabels_c14, 
                          os.path.join(config['images_folder'], 'data_C14_notlabeled_good/'), 
@@ -329,7 +335,7 @@ def main():
 
     dataset_infinity_notlabeled = PVDataset(data_Infinity_notlabeled, channels=[config['channels']] * len(data_Infinity_notlabeled), scale=1, return_labels=True)
     predictions_infinity = trainer_7channel.predict(dataset_infinity_notlabeled) 
-    pred_labels_infinity = logits_to_classes(predictions_infinity)
+    pred_labels_infinity, _ = logits_to_classes(predictions_infinity)
     predlabels_infinity = convert_list_of_arrays_to_labels(pred_labels_infinity)
     save_images_by_label(data_Infinity_notlabeled, predlabels_infinity, 
                          os.path.join(config['images_folder'], 'data_Infinity_notlabeled_good/'), 

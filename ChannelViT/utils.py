@@ -525,7 +525,7 @@ def logits_to_classes(logits, initial_threshold=0.2, relative_threshold=0.7, min
                     predicted_classes[i] = pred
             # If max_prob < min_confidence, leave as all zeros
     
-    return predicted_classes
+    return predicted_classes, probabilities
 
 def logits_to_classes_TISO(logits, initial_threshold=0.9, relative_threshold=0.7, min_confidence=0.5):
     """
@@ -605,7 +605,7 @@ def find_mismatched_data(temp_Infinity, trainer, data_Infinity, current_dir, ima
     predictions_inf = trainer.predict(dataset_infint) 
     # Save predictions to a file
     np.save('predictions_inf10.npy', np.array(predictions_inf, dtype=object))
-    pred_labels = logits_to_classes(predictions_inf, initial_threshold=0.5)
+    pred_labels, _ = logits_to_classes(predictions_inf, initial_threshold=0.5)
     # Save pred_labels to a file
     true_labels_inf = np.array([item['labels'] for item in dataset_infint])
     class_accuracies = {}
@@ -614,7 +614,7 @@ def find_mismatched_data(temp_Infinity, trainer, data_Infinity, current_dir, ima
         print(f"Class '{label_name}': accuracy={class_accuracies[label]:.2f}, count={length}")
 
     # predictions = np.load('predictions_inf10.npy', allow_pickle=True)
-    # pred_labels = logits_to_classes(predictions, initial_threshold=0.5)
+    # pred_labels, _ = logits_to_classes(predictions, initial_threshold=0.5)
     
     
     # If your labels are one-hot or multi-hot arrays:

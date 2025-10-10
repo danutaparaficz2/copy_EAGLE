@@ -14,3 +14,4 @@ requirements.txt
 *.png
 *.jpeg
 *.log
+results_*/

@@ -215,6 +215,7 @@ def retrain_resume_or_load_pretrained_second_stage(args, current_dir, input_mode
         print(f"Trainer state restored from {latest_checkpoint}")
     return trainer
 
+
 def retrain_resume_or_load_pretrained(args, current_dir, input_model_folder, device, output_model_folder,concat_train=None, concat_val=None, 
                                       channels=None, name_flag=''):
     # Model with originally pretrained weights
@@ -256,6 +257,7 @@ def retrain_resume_or_load_pretrained(args, current_dir, input_model_folder, dev
         print(f"Trainer state restored from {latest_checkpoint}")
     return trainer
 
+
 def retrain_resume_or_load_pretrained_second_stage(args, current_dir, input_model_folder, device, output_model_folder,concat_train=None, concat_val=None):
     # Model with originally pretrained weights
     if args.retrain == 'retrain':
@@ -273,8 +275,8 @@ def retrain_resume_or_load_pretrained_second_stage(args, current_dir, input_mode
         #         for param in block.parameters():
         #             param.requires_grad = False
         # --- END OF NEW CODE FOR FREEZING ---
-        args.num_train_epochs = 140
-        trainer = init_trainer(args, model, concat_val, current_dir + output_model_folder + 'all_7channels_finetuned/')
+        args.num_train_epochs = 100
+        trainer = init_trainer(args, model, concat_val, current_dir + output_model_folder + 'all_7channels_finetuned_testing/')
 
         # Train the model with the 7-channel data
         trainer= train_save_model(

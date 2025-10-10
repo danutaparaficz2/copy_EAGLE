@@ -16,6 +16,7 @@ from utils import (convert_list_of_arrays_to_labels, calculate_class_accuracy_on
 from plots import (save_images_by_label, plot_multilabel_confusion_matrix,
                     plot_samples_from_all_labels_with_acc, ploting_training_results)
 from training_multi_one_input_type import load_post_trained_model
+import shutil
 
 
 def parse_args():
@@ -182,7 +183,7 @@ def run_predictions(trainer, dataset, dataset_name, out_folder, args, threshold=
         return
 
     predictions = trainer.predict(dataset) 
-    pred_labels = logits_to_classes(predictions, initial_threshold=threshold)
+    pred_labels, prob = logits_to_classes(predictions, initial_threshold=threshold)
     predlabels = convert_list_of_arrays_to_labels(pred_labels)
 
     empty_indices = [i for i, x in enumerate(predlabels) if not x]
@@ -196,7 +197,7 @@ def run_predictions(trainer, dataset, dataset_name, out_folder, args, threshold=
     
     
     if len(true_labels) > 0:
-        save_predictions(true_labels, pred_labels, args.seed, dataset_name)
+        save_predictions(true_labels, pred_labels, prob, args.seed, dataset_name)
         '''
         class_names = label_names()
         plot_multilabel_confusion_matrix(true_labels, pred_labels, class_names, output_path=os.path.join(out_folder, f'{dataset_name}_confusion_matrix.png'))
@@ -214,13 +215,14 @@ def run_predictions(trainer, dataset, dataset_name, out_folder, args, threshold=
         print(f"No samples left for evaluation after filtering. Skipping plots.")
 
 
-def save_predictions(true_labels, pred_labels, seed, data_name):
-    os.makedirs('results', exist_ok=True)
-    save_path = f'results/{data_name}_{seed}.pkl'
+def save_predictions(true_labels, pred_labels, prob, seed, data_name):
+    os.makedirs('results_test', exist_ok=True)
+    save_path = f'results_test/{data_name}_{seed}.pkl'
     with open(save_path, 'wb') as f:
         pickle.dump({
             'pred_labels': pred_labels,
-            'true_labels': true_labels
+            'true_labels': true_labels,
+            'probabilities': prob
         }, f)
     print(f"Saved predictions and true labels to {save_path}")
 
@@ -249,6 +251,12 @@ def main():
     retrain = args.retrain
     if retrain == 'retrain_second_stage':
         args.retrain = 'predict_only'  # Skip first stage if only second stage retraining is desired
+    
+    if args.retrain == 'retrain':
+        if os.path.exists(config['output_model_folder']):
+            shutil.rmtree(config['output_model_folder'])
+            print(f"Removed existing output folder: {config['output_model_folder']}")
+            
     trainer = retrain_resume_or_load_pretrained(
         args, 
         config['current_dir'], 
