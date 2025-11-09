@@ -86,17 +86,187 @@ def normalize_image_0_255(files_by_folder, PATH, tech, this_folders_only=[], fol
     filtered_labels = []
     for folder, files in files_by_folder.items():
         if len(folders_excluded) != 0:
-            if any(f in folder for f in folders_excluded):
-                # Display and save images in the folder
-                for filename, label in files:
-                    # Allow for one-hot encoding with multiple ones (multi-label)
-                    if isinstance(label, (np.ndarray, list)):
-                        label_indices = [i for i, v in enumerate(label) if v == 1]
-                        if not label_indices:
-                            continue
-                    else:
-                        label_indices = [str(label)]
+            if folder in folders_excluded:
+                    continue
+           # if any(f in folder for f in folders_excluded):
+                # # Display and save images in the folder
+                # for filename, label in files:
+                #     # Allow for one-hot encoding with multiple ones (multi-label)
+                #     if isinstance(label, (np.ndarray, list)):
+                #         label_indices = [i for i, v in enumerate(label) if v == 1]
+                #         if not label_indices:
+                #             continue
+                #     else:
+                #         label_indices = [str(label)]
 
+                #     image_path = os.path.join(PATH, 'bboxes', filename)
+                #     if tech == '_EL_':
+                #         try:
+                #             image = Image.open(image_path).convert('L')
+                #             # Find corresponding UV and VI images
+                #             uv_filename = filename.replace('_EL_', '_UV_')
+                #             vi_filename = filename.replace('_EL_', '_VI_')
+                #             uv_path = os.path.join(PATH, 'bboxes', uv_filename)
+                #             vi_path = os.path.join(PATH, 'bboxes', vi_filename)
+                #             try:
+                #                 image_uv = Image.open(uv_path)
+                #                 image_vi = Image.open(vi_path)
+                #                 image_uv_np = np.array(image_uv)
+                #                 image_vi_np = np.array(image_vi)
+                #                 if image_uv_np.max() > 255 or image_uv_np.min() < 0:
+                #                     raise ValueError("UV image values should be in the range [0, 255]")
+                #                 if image_vi_np.max() > 255 or image_vi_np.min() < 0:
+                #                     raise ValueError("VI image values should be in the range [0, 255]")
+                #             except FileNotFoundError:
+                #                 print(f"UV or VI image not found for {filename}. Skipping this image.")
+                #                 continue
+                #             except Exception as e:
+                #                 print(f"Could not load UV or VI image for {filename}: {e}")
+                #                 continue
+
+                #             import matplotlib.pyplot as plt
+
+                #             fig, axs = plt.subplots(1, 3, figsize=(12, 4))
+                #             axs[0].imshow((image), cmap='gray')
+                #             axs[0].set_title('EL')
+                #             axs[1].imshow(255-np.array(image_uv))
+                #             axs[1].set_title('UV ')
+                #             axs[2].imshow(255-np.array(image_vi))
+                #             axs[2].set_title('VI')
+                #             for ax in axs:
+                #                 ax.axis('off')
+                #             save_folder = os.path.join('Data/images_perf/', folder)
+                #             os.makedirs(save_folder, exist_ok=True)
+                #             file_only = os.path.basename(filename.replace('.tif', '.png'))
+                #             for label_idx in label_indices:
+                #                 label_folder = os.path.join(save_folder, label_names(flag='Website')[label_idx])
+                #                 os.makedirs(label_folder, exist_ok=True)
+                #                 save_path = os.path.join(label_folder, file_only)
+                #                 plt.tight_layout()
+                #                 # Combine all label indices for this image into a string
+                #                 label_names(flag='Website')
+                #                 label_indices_str = ",".join(label_names(flag='Website')[idx] for idx in label_indices)
+                #                 plt.title(f'Labels: {label_indices_str}')
+                #                 plt.savefig(save_path)
+
+                #             plt.close()
+                #         except Exception as e:
+                #             print(f"Error displaying or saving {image_path}: {e}")
+                # continue 
+        if len(this_folders_only) != 0:
+            if  folder in this_folders_only:
+                print(folder)
+                num_files = len(files)
+                npz_path = os.path.join('../Data/images/', f'normalized_{folder}_{tech}.npz')
+                # If a cached normalized file exists for this folder+tech, load and reuse it
+                if os.path.exists(npz_path):
+                    try:
+                        with np.load(npz_path, allow_pickle=True) as npz:
+                            images_arr = npz['images']
+                            normalized_images_per_folder = [np.asarray(img).astype(np.uint8) for img in images_arr]
+                            labels_loaded = list(npz['labels'])
+                        print(f"Loaded cached normalized file {npz_path} with {len(normalized_images_per_folder)} images")
+                        normalized_images.extend(normalized_images_per_folder)
+                        filtered_labels.extend(labels_loaded)
+                        continue
+                    except Exception as e:
+                        print(f"Failed to load cached npz {npz_path}: {e}")
+                        # fall back to recomputing if load fails
+                else:
+
+                    updated_filenames  = [filename.replace('_EL_', tech) for filename, label in files]
+                    mean, std, max, min = calculate_mean_std_per_folder(PATH+'/bboxes/', updated_filenames)
+                    print(f"Mean: {mean}, Std: {std}, Max: {max}, Min: {min}")
+                    normalized_images.extend(load_and_normalize_images(PATH+'/bboxes/', updated_filenames, mean, std, max, min, all_colors=all_colors))
+                    labels = [label for _, label in files]
+                    filtered_labels.extend(labels)
+
+        else:   
+            num_files = len(files)
+            npz_path = os.path.join('../Data/images/', f'normalized_{folder}_{tech}.npz')
+            # If a cached normalized file exists for this folder+tech, load and reuse it
+            if os.path.exists(npz_path):
+                try:
+                    with np.load(npz_path, allow_pickle=True) as npz:
+                        images_arr = npz['images']
+                        normalized_images_per_folder = [np.asarray(img).astype(np.uint8) for img in images_arr]
+                        labels_loaded = list(npz['labels'])
+                    print(f"Loaded cached normalized file {npz_path} with {len(normalized_images_per_folder)} images")
+                    normalized_images.extend(normalized_images_per_folder)
+                    filtered_labels.extend(labels_loaded)
+                    continue
+                except Exception as e:
+                    print(f"Failed to load cached npz {npz_path}: {e}")
+                    # fall back to recomputing if load fails
+            else:
+                sample = files[0][0] if files else ''
+                print(f"{folder} {tech} n={num_files} sample={sample}")
+
+                updated_filenames = [filename.replace('_EL_', tech) for filename, label in files]
+                labels = [label for _, label in files]
+                for label in labels:
+                        # Allow for one-hot encoding with multiple ones (multi-label)
+                        if isinstance(label, (np.ndarray, list)):
+                            label_indices = [i for i, v in enumerate(label) if v == 1]
+                            if not label_indices:
+                                continue
+                        else:
+                            label_indices = [str(label)]
+                # plot_folders_seperatly(updated_filenames, PATH, tech, folder, label_indices)
+
+                # # Remove '23_P08_G2' from updated_filenames and respective labels
+                if any('23_P08_G2' in fname for fname in updated_filenames):
+                    print("'23_P08_G2' found in updated_filenames, removing it and respective labels")
+                    filtered = [(fname, label) for fname, label in zip(updated_filenames, labels) if '23_P08_G2' not in fname]
+                    if filtered:
+                        updated_filenames, labels = zip(*filtered)
+                        updated_filenames = list(updated_filenames)
+                        labels = list(labels)
+                    else:
+                        updated_filenames, labels = [], []
+                else:
+                    print("'23_P08_G2' not found in updated_filenames")
+                    labels = [label for _, label in files]
+                # Find indices where filenames are duplicated
+                filename_indices = defaultdict(list)
+                for idx, fname in enumerate(updated_filenames):
+                    filename_indices[fname].append(idx)
+                duplicate_indices = {fname: idxs for fname, idxs in filename_indices.items() if len(idxs) > 1}
+                if duplicate_indices:
+                    print(f"Duplicate filename indices in folder '{folder}' : {duplicate_indices}")
+                    # Remove the first occurrence of each duplicate filename from updated_filenames
+                    for fname, idxs in duplicate_indices.items():
+                        if idxs:
+                            # Remove the first occurrence
+                            updated_filenames[idxs[1]] = None
+                            labels[idxs[1]] = None  # Also remove the corresponding label
+                    # Remove all None entries from updated_filenames and corresponding labels
+                    updated_filenames = [f for f in updated_filenames if f is not None]
+                    labels = [l for l in labels if l is not None]
+                # Step 1: Calculate mean and std for the folder
+
+                
+                mean, std, max, min = calculate_mean_std_per_folder(PATH+'/bboxes/', updated_filenames)
+                print(f"Mean: {mean}, Std: {std}", f"Max: {max}, Min: {min}")
+                normalized_images_per_folder = load_and_normalize_images(PATH+'/bboxes/', updated_filenames, mean, std, max, min, all_colors=all_colors)
+                # save normalized images for the folder and labels in file
+                imgs_to_save = np.array(normalized_images_per_folder, dtype=object)
+                labels_to_save = np.array(labels, dtype=object)
+                np.savez_compressed(
+                    os.path.join('../Data/images/', f'normalized_{folder}_{tech}.npz'),
+                    images=imgs_to_save,
+                    labels=labels_to_save
+               ) # Step 2: Load and normalize images using the calculated mean and std
+                normalized_images.extend(normalized_images_per_folder)
+
+                filtered_labels.extend(labels)
+                # print(np.min([image.min() for image in normalized_images]))
+                # print(np.max([image.max() for image in normalized_images]))
+                # print(f"Loaded and normalized {len(normalized_images)} images.")
+    return normalized_images, filtered_labels
+
+def plot_folders_seperatly(filenames, PATH, tech, folder, label_indices):
+    for filename in filenames:
                     image_path = os.path.join(PATH, 'bboxes', filename)
                     if tech == '_EL_':
                         try:
@@ -150,64 +320,6 @@ def normalize_image_0_255(files_by_folder, PATH, tech, this_folders_only=[], fol
                             plt.close()
                         except Exception as e:
                             print(f"Error displaying or saving {image_path}: {e}")
-                continue 
-        if len(this_folders_only) != 0:
-            if any(f in folder for f in this_folders_only):
-                print(folder)
-
-                updated_filenames  = [filename.replace('_EL_', tech) for filename, label in files]
-                mean, std, max, min = calculate_mean_std_per_folder(PATH+'/bboxes/', updated_filenames)
-                print(f"Mean: {mean}, Std: {std}, Max: {max}, Min: {min}")
-                normalized_images.extend(load_and_normalize_images(PATH+'/bboxes/', updated_filenames, mean, std, max, min, all_colors=all_colors))
-                labels = [label for _, label in files]
-                filtered_labels.extend(labels)
-
-        else:   
-            print(folder)
-
-            updated_filenames = [filename.replace('_EL_', tech) for filename, label in files]
-            # Remove '23_P08_G2' from updated_filenames and respective labels
-            if any('23_P08_G2' in fname for fname in updated_filenames):
-                print("'23_P08_G2' found in updated_filenames, removing it and respective labels")
-                filtered = [(fname, label) for fname, label in zip(updated_filenames, labels) if '23_P08_G2' not in fname]
-                if filtered:
-                    updated_filenames, labels = zip(*filtered)
-                    updated_filenames = list(updated_filenames)
-                    labels = list(labels)
-                else:
-                    updated_filenames, labels = [], []
-            else:
-                print("'23_P08_G2' not found in updated_filenames")
-                labels = [label for _, label in files]
-            # Find indices where filenames are duplicated
-            filename_indices = defaultdict(list)
-            for idx, fname in enumerate(updated_filenames):
-                filename_indices[fname].append(idx)
-            duplicate_indices = {fname: idxs for fname, idxs in filename_indices.items() if len(idxs) > 1}
-            if duplicate_indices:
-                print(f"Duplicate filename indices in folder '{folder}' : {duplicate_indices}")
-                # Remove the first occurrence of each duplicate filename from updated_filenames
-                for fname, idxs in duplicate_indices.items():
-                    if idxs:
-                        # Remove the first occurrence
-                        updated_filenames[idxs[1]] = None
-                        labels[idxs[1]] = None  # Also remove the corresponding label
-                # Remove all None entries from updated_filenames and corresponding labels
-                updated_filenames = [f for f in updated_filenames if f is not None]
-                labels = [l for l in labels if l is not None]
-            # Step 1: Calculate mean and std for the folder
-            mean, std, max, min = calculate_mean_std_per_folder(PATH+'/bboxes/', updated_filenames)
-            print(f"Mean: {mean}, Std: {std}", f"Max: {max}, Min: {min}")
-
-            # Step 2: Load and normalize images using the calculated mean and std
-            normalized_images.extend(load_and_normalize_images(PATH+'/bboxes/', updated_filenames, mean, std, max, min, all_colors=all_colors))
-
-            filtered_labels.extend(labels)
-            # print(np.min([image.min() for image in normalized_images]))
-            # print(np.max([image.max() for image in normalized_images]))
-            # print(f"Loaded and normalized {len(normalized_images)} images.")
-    return normalized_images, filtered_labels
-
 def calculate_mean_std_per_folder(folder_path, image_files):
     """
     Calculate the mean and standard deviation of images in a folder.
@@ -378,10 +490,16 @@ class Load_Data_Handler:
 
         self.labels_as_integers = [np.where(label == 1)[0].tolist() for label in self.labels]
         self.empty_label_indices = [i for i, label in enumerate(self.labels) if isinstance(label, np.ndarray) and np.all(label == 0)]
-
+        print(f"Found {len(self.empty_label_indices)} images with empty labels. These will be removed from the dataset.")
         # Remove labels at indices in self.empty_label_indices
         filtered_images = [img for i, img in enumerate(self.images) if i not in self.empty_label_indices]
-        filtered_labels = [torch.tensor(label) for i, label in enumerate(self.labels) if i not in self.empty_label_indices]
+        filtered_labels = []
+        for i, label in enumerate(self.labels):
+            lbl_arr = np.asarray(label)
+            lbl_arr = lbl_arr.astype(np.float32)
+
+            filtered_labels.append(torch.as_tensor(lbl_arr))
+#       filtered_labels = [torch.tensor(label) for i, label in enumerate(self.labels) if i not in self.empty_label_indices]
         self.data = list(zip(filtered_images, filtered_labels))
         
 
@@ -452,6 +570,7 @@ class Load_Data_Handler_notlabeled:
                     self.images_uv, _ = normalize_image_0_255(files_by_folder, PATH, technology, all_colors=args.all_colors)
                 elif technology == '_VI_':
                     self.images_vis, _ = normalize_image_0_255(files_by_folder, PATH, technology, all_colors=args.all_colors)
+                    
             # self.images_el = [np.array(Image.open(PATH+'/segments/'+subfolder+'/'+path).convert('L')).astype(np.uint8) for path in elpaths]
             # self.images_uv = [np.array(Image.open(PATH+'/segments/'+subfolder+'/'+path).convert('L')).astype(np.uint8) for path in uvpaths]
             # self.images_vis = [np.array(Image.open(PATH+'/segments/'+subfolder+'/'+path).convert('L')).astype(np.uint8) for path in vispaths]
@@ -647,8 +766,8 @@ def load_all_data_together(current_dir, images_folder, name_flag='rgb', args=Non
 
         # integer_labels = [torch.argmax(item[1]).item() for item in data_Duramat]  # Convert one-hot encoded labels to integers
         labels_as_integers = [np.where(label == 1)[0].tolist() for _, label in data_Duramat]
-
         save_images_by_label(data_Duramat, labels_as_integers, current_dir+images_folder+'/Duramat_images_last/')
+
 
         # ########### INFINITY ##########
 

@@ -39,6 +39,7 @@ def save_images_by_label(images, labelss, output_dir, flag='', name_flag='', ori
             # Create a folder for the label
             label_folder = os.path.join(output_dir, label_names(flag=flag)[label])
             os.makedirs(label_folder, exist_ok=True)
+            os.makedirs(output_dir, exist_ok=True)
 
             # Enhance contrast and save the image
             if imag.ndim == 3:
@@ -218,7 +219,12 @@ def ploting_training_results(trainer, outfolder, last_checkpoint='', accuracies=
         plt.title(f'Validation Accuracy Duramat - {accuracies[0]:.2f} and Infinty {accuracies[1]:.2f}')
     else:
         plt.title('Validation Accuracy')
-    plt.savefig(outfolder+'/loss_plot1.png')
+    # ensure output directory exists
+    try:
+        os.makedirs(outfolder, exist_ok=True)
+    except Exception:
+        pass
+    plt.savefig(os.path.join(outfolder, 'loss_plot1.png'))
     plt.close()
 
 def plot_samples_from_all_labels_with_acc(ds_val, predlabels, class_accuracies, data_name='Unknown', outfolder='./Data', certainty= None):

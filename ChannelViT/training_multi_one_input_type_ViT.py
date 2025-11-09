@@ -1,19 +1,16 @@
-
-import os
-# Prevent Transformers from importing TensorFlow / tf_keras which causes circular import in your venv
-os.environ["TRANSFORMERS_NO_TF"] = "1"
 from torchvision import transforms
 from torch.utils.data.dataloader import default_collate
 from sklearn.model_selection import train_test_split
 from transformers import TrainingArguments, Trainer
-
-
 from plots import ploting_training_results
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 import torch
 from torch import nn
+import os
 from channelvit.backbone.hcs_channel_vit import hcs_channelvit_small
+from channelvit.backbone.vit import vit_small
+
 import numpy as np
 # My libraries
 from load_data import  PVDataset
@@ -21,12 +18,11 @@ from utils import compute_metrics_sigmoid, augment_underrepresented_classes
 
 
 
-
 class CustomTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
 
         labels = inputs['labels']
-        outputs = model(inputs['images'], extra_tokens=inputs)
+        outputs = model(inputs['images'])
         loss_fct = nn.BCEWithLogitsLoss()
         # logits = outputs.logits
 
@@ -40,7 +36,7 @@ class CustomTrainer(Trainer):
 
         labels = inputs['labels']
         with torch.no_grad():
-            outputs = model(inputs['images'], extra_tokens=inputs)
+            outputs = model(inputs['images'])
         if prediction_loss_only:
             loss = self.compute_loss_function(outputs, labels)
             return (loss, None, None)
@@ -65,7 +61,7 @@ def custom_collate_fn(examples):
             else:
                 items.append(torch.tensor(item).int())
         rest[k] = default_collate(items)
-    return {'images': images, **rest}
+    return {'images': images}
     
 
 def init_trainer(args, model, val_dataset, outfolder):
@@ -157,7 +153,7 @@ def train_save_model(trainer, train_dataset, val_dataset, outfolder):
 
   # Load the model
 def load_model(args, folder, device, weights_path, num_classes):
-    model = hcs_channelvit_small(patch_size= args.patch_size, in_chans=args.max_channels)
+    model = vit_small(patch_size= args.patch_size)
     model.load_state_dict(torch.load(folder+weights_path+'.pth', map_location=device))
     # num_classes = 4  # Replace with the actual number of classes in your dataset
     model.head = nn.Linear(model.norm.normalized_shape[0], num_classes)
@@ -166,7 +162,7 @@ def load_model(args, folder, device, weights_path, num_classes):
 
   # Load the model
 def load_post_trained_model(args, folder, device, weights_path, num_classes):
-    model = hcs_channelvit_small(patch_size= args.patch_size, in_chans=args.max_channels)
+    model = vit_small(patch_size= args.patch_size)
     # num_classes = 4  # Replace with the actual number of classes in your dataset
     model.head = nn.Linear(model.norm.normalized_shape[0], num_classes)
     model.load_state_dict(torch.load(folder+weights_path+'.pth', map_location=device))
@@ -181,7 +177,6 @@ def retrain_resume_or_load_pretrained_second_stage(args, current_dir, input_mode
     # Model with originally pretrained weights
     if args.retrain == 'retrain':
         model = load_post_trained_model(args, current_dir+output_model_folder, device, 'trained_state_dict', args.num_classes)
-        args.num_train_epochs = 53
         trainer = init_trainer(args, model, concat_val,  current_dir+output_model_folder)
         trainer = train_save_model(
             trainer,
@@ -265,50 +260,50 @@ def retrain_resume_or_load_pretrained(args, current_dir, input_model_folder, dev
     return trainer
 
 
-# def retrain_resume_or_load_pretrained_second_stage(args, current_dir, input_model_folder, device, output_model_folder,concat_train=None, concat_val=None):
-#     # Model with originally pretrained weights
-#     if args.retrain == 'retrain':
+def retrain_resume_or_load_pretrained_second_stage(args, current_dir, input_model_folder, device, output_model_folder,concat_train=None, concat_val=None):
+    # Model with originally pretrained weights
+    if args.retrain == 'retrain':
 
-#         model = load_model(args, current_dir+input_model_folder, device, args.init_weights_name, args.num_classes)
-#         # model = load_post_trained_model(args, current_dir+output_model_folder, device, 'trained_state_dict', args.num_classes)
-#         # Initialize the trainer for the second stage
-#         # Freeze the patch embedding layer
-#         # for param in model.patch_embed.parameters():
-#         #     param.requires_grad = False
 
-#         # # Freeze the first few blocks (e.g., first 4 out of 12 for ViT-Small)
-#         # for i, block in enumerate(model.blocks):
-#         #     if i < 6:  # Adjust this number to control how many blocks to freeze
-#         #         for param in block.parameters():
-#         #             param.requires_grad = False
-#         # --- END OF NEW CODE FOR FREEZING ---
-#         args.num_train_epochs = 53
-#         trainer = init_trainer(args, model, concat_val, current_dir + output_model_folder + 'all_7channels_finetuned_one/')
+        model = load_post_trained_model(args, current_dir+output_model_folder, device, 'trained_state_dict', args.num_classes)
+        # Initialize the trainer for the second stage
+        # Freeze the patch embedding layer
+        # for param in model.patch_embed.parameters():
+        #     param.requires_grad = False
 
-#         # Train the model with the 7-channel data
-#         trainer= train_save_model(
-#             trainer,
-#             concat_train,
-#             concat_val,
-#             current_dir + output_model_folder + 'all_7channels_finetuned_one/'
-#     )
-#         ploting_training_results(trainer, current_dir+output_model_folder+ 'all_7channels_finetuned_one/', last_checkpoint='', accuracies=[])
+        # # Freeze the first few blocks (e.g., first 4 out of 12 for ViT-Small)
+        # for i, block in enumerate(model.blocks):
+        #     if i < 6:  # Adjust this number to control how many blocks to freeze
+        #         for param in block.parameters():
+        #             param.requires_grad = False
+        # --- END OF NEW CODE FOR FREEZING ---
+        args.num_train_epochs = 100
+        trainer = init_trainer(args, model, concat_val, current_dir + output_model_folder + 'all_7channels_finetuned_testing/')
 
-#     else:
-#         model = load_model(args, current_dir+input_model_folder, device, args.init_weights_name, args.num_classes)
-#         #model = load_post_trained_model(args, current_dir+output_model_folder+'duramat_'+str(len(channels))+'channels'+name_flag+'/', device, 'trained_state_dict', args.num_classes)
+        # Train the model with the 7-channel data
+        trainer= train_save_model(
+            trainer,
+            concat_train,
+            concat_val,
+            current_dir + output_model_folder + 'all_7channels_finetuned/'
+    )
+        ploting_training_results(trainer, current_dir+output_model_folder+ 'all_7channels_finetuned/', last_checkpoint='', accuracies=[])
+
+    else:
+        model = load_model(args, current_dir+input_model_folder, device, args.init_weights_name, args.num_classes)
+        # model = load_post_trained_model(args, current_dir+output_model_folder+'duramat_'+str(len(channels))+'channels'+name_flag+'/', device, 'trained_state_dict', args.num_classes)
         
-#         trainer = init_trainer(args, model, concat_val, current_dir+output_model_folder+ 'all_7channels_finetuned_testing/')
+        trainer = init_trainer(args, model, concat_val, current_dir+output_model_folder+ 'all_7channels_finetuned/')
   
-#         checkpoints = [d for d in os.listdir(current_dir+output_model_folder+ 'all_7channels_finetuned_testing/') if d.startswith('checkpoint-')]
-#         if not checkpoints:
-#             print("No checkpoints found. Training the model.")
-#             trainer.train()
-#         else:
-#             print("Found checkpoints, loading the latest one.")
-#         # Sort checkpoints by the number in their name and get the latest one
-#         latest_checkpoint = os.path.join(current_dir+output_model_folder+ 'all_7channels_finetuned_testing/', sorted(checkpoints, key=lambda x: int(x.split('-')[-1]))[-1])
-#         # Restore state without continuing training
-#         trainer._load_from_checkpoint(latest_checkpoint)
-#         print(f"Trainer state restored from {latest_checkpoint}")
-#     return trainer
+        checkpoints = [d for d in os.listdir(current_dir+output_model_folder+ 'all_7channels_finetuned/') if d.startswith('checkpoint-')]
+        if not checkpoints:
+            print("No checkpoints found. Training the model.")
+            trainer.train()
+        else:
+            print("Found checkpoints, loading the latest one.")
+        # Sort checkpoints by the number in their name and get the latest one
+        latest_checkpoint = os.path.join(current_dir+output_model_folder+ 'all_7channels_finetuned/', sorted(checkpoints, key=lambda x: int(x.split('-')[-1]))[-1])
+        # Restore state without continuing training
+        trainer._load_from_checkpoint(latest_checkpoint)
+        print(f"Trainer state restored from {latest_checkpoint}")
+    return trainer

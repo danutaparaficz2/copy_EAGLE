@@ -21,12 +21,12 @@ from training_multi_one_input_type import load_post_trained_model
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train and evaluate the model.")
-    parser.add_argument('--num_train_epochs', type=int, default=36, help='Number of training epochs.')
+    parser.add_argument('--num_train_epochs', type=int, default=15, help='Number of training epochs.')
     parser.add_argument('--batch_size', type=int, default=13, help='Batch size for training and evaluation.')
-    parser.add_argument('--retrain', type=str, default='predict_only', choices=['retrain', 'resume', 'predict_only'], help='Choose training mode: retrain, resume, or predict_only.')
-    parser.add_argument('--use_only_EL', action='store_true', default=False, help='Use only EL images.')
+    parser.add_argument('--retrain', type=str, default='retrain', choices=['retrain', 'resume', 'predict_only'], help='Choose training mode: retrain, resume, or predict_only.')
+    parser.add_argument('--use_only_EL', action='store_true', default=True, help='Use only EL images.')
     parser.add_argument('--all_colors', action='store_true', default=True, help='Use all available channels.')
-    parser.add_argument('--num_classes', type=int, default=7, help='Number of classes.')     
+    parser.add_argument('--num_classes', type=int, default=3, help='Number of classes.')     
     parser.add_argument('--init_weights_name', type=str, default='imagenet_channelvit_small_p16_with_hcs_supervised', help='Name of the initial weights file.')
     
     args = parser.parse_args()
@@ -85,9 +85,105 @@ def load_all_data(config, args):
         with open(filtered_data_path, "rb") as f:
             filtered_data = pickle.load(f)
         print(f"Filtered data loaded from {filtered_data_path}")
+        # --- Keep only samples belonging to classes 0,1,2 ---
+        # This makes the downstream `just_transform` and dataset creation
+        # operate only on the requested class subset.
+        allowed_classes = {0, 1, 2}
+
+        def _get_label_from_item(item):
+            """Return the label from a dataset item in a robust way.
+
+            Supports: (img, label) tuples, dicts with 'labels' or 'label'.
+            """
+            if item is None:
+                return None
+            if isinstance(item, dict):
+                return item.get('labels') or item.get('label')
+            if isinstance(item, (list, tuple)):
+                return item[1] if len(item) > 1 else None
+            return None
+
+        def _label_has_allowed(label):
+            """Return True if the provided label indicates membership in
+            any of the allowed_classes.
+
+            Handles:
+            - scalar int labels
+            - one-hot or multi-hot arrays/lists/tensors
+            - probability vectors (uses argmax as fallback)
+            """
+            if label is None:
+                return False
+            try:
+                # ints
+                if isinstance(label, int):
+                    return label in allowed_classes
+                import numpy as np
+                import torch
+            except Exception:
+                # minimal fallback
+                try:
+                    return int(label) in allowed_classes
+                except Exception:
+                    return False
+
+            # torch.Tensor -> numpy
+            if isinstance(label, torch.Tensor):
+                try:
+                    arr = label.detach().cpu().numpy()
+                except Exception:
+                    arr = np.array(label)
+            else:
+                arr = np.array(label)
+
+            # if one-hot / multi-hot vector
+            if arr.ndim == 1 and arr.size >= max(allowed_classes) + 1:
+                for c in allowed_classes:
+                    try:
+                        if int(arr[c]) == 1:
+                            return True
+                    except Exception:
+                        # try tolerant comparison (probabilities)
+                        try:
+                            if float(arr[c]) > 0.5:
+                                return True
+                        except Exception:
+                            continue
+                # not a direct one-hot, fallback to argmax
+                try:
+                    return int(arr.argmax()) in allowed_classes
+                except Exception:
+                    return False
+
+            # other shapes: use argmax if possible
+            try:
+                return int(arr.argmax()) in allowed_classes
+            except Exception:
+                return False
+
+        # Filter a set of known keys if present in the loaded dict
+        keys_to_filter = [
+            'data_Duramat_filtered_more',
+            'data_Infinity_filtered_more',
+            'data_Website_filtered',
+            'data_Website_Ralf_filtered'
+        ]
+        for k in keys_to_filter:
+            if k in filtered_data and isinstance(filtered_data[k], (list, tuple)):
+                before = len(filtered_data[k])
+                new_list = []
+                for item in filtered_data[k]:
+                    lbl = _get_label_from_item(item)
+                    if _label_has_allowed(lbl):
+                        new_list.append(item)
+                filtered_data[k] = new_list
+                after = len(new_list)
+                print(f"Filtered '{k}': {before} -> {after} (kept classes {sorted(allowed_classes)})")
     else:
         load_all_data_together( config['current_dir'],  config['images_folder'], name_flag='rgb', args=args)
         raise FileNotFoundError(f"Filtered data not found at {filtered_data_path}. Please generate it first.")
+    
+
     # calculate_raw_data_means(filtered_data['data_Duramat_filtered_more'] , 'data_Duramat_filtered_more', sample_size=None)
     # calculate_raw_data_means(filtered_data['data_Website_Ralf_filtered'] , 'data_Website_Ralf_filtered', sample_size=None)
     # calculate_raw_data_means(filtered_data['data_Website_filtered'] , 'data_Website_filtered', sample_size=None)
@@ -98,7 +194,7 @@ def load_all_data(config, args):
 
 
 ######################
-    cleaned_1channel_data = tensor_label_list_Duramat + tensor_label_list_Infinity
+    cleaned_1channel_data = tensor_label_list_Duramat # + tensor_label_list_Infinity
     cleaned_7channel_data = tensor_label_list_Website
 
 
@@ -124,7 +220,7 @@ def load_all_data(config, args):
     print("="*80)
 
     train_1channel_data, val_1channel_data = train_test_split(cleaned_1channel_data, test_size=0.2, random_state=42)
-    train_7channel_data, val_7channel_data = train_test_split(cleaned_7channel_data, test_size=0.1, random_state=42)
+    train_7channel_data, val_7channel_data = train_test_split(cleaned_7channel_data, test_size=0.3, random_state=42)
     
     print(f"Loaded {len(cleaned_1channel_data)} one-channel samples and {len(cleaned_7channel_data)} seven-channel samples.")
     print(f"Splits: 1-channel (Train: {len(train_1channel_data)}, Val: {len(val_1channel_data)}), 7-channel (Train: {len(train_7channel_data)}, Val: {len(val_7channel_data)})")
@@ -136,9 +232,9 @@ def load_all_data(config, args):
     
     dataset_train_1channel = PVDataset(train_1channel_data, channels=[[0]] * len(train_1channel_data), scale=1, return_labels=True, transform=train_transforms)
     dataset_val_1channel = PVDataset(val_1channel_data, channels=[[0]] * len(val_1channel_data), scale=1, return_labels=True, transform=val_transforms)
-    dataset_train_7channel = PVDataset(train_7channel_data, channels=[config['channels']] * len(train_7channel_data), scale=1, return_labels=True, transform=train_transforms)
-    dataset_val_7channel = PVDataset(val_7channel_data, channels=[config['channels']] * len(val_7channel_data), scale=1, return_labels=True, transform=val_transforms)
-
+    dataset_train_7channel = PVDataset(train_7channel_data, channels=[[0]] * len(train_7channel_data), scale=1, return_labels=True, transform=train_transforms)
+    dataset_val_7channel = PVDataset(val_7channel_data, channels=[[0]] * len(val_7channel_data), scale=1, return_labels=True, transform=val_transforms)
+    dataset_Infinity = PVDataset(tensor_label_list_Infinity, channels=[[0]] * len(tensor_label_list_Infinity), scale=1, return_labels=True, transform=val_transforms)
 
     # ADD NORMALIZATION CHECKS HERE
     print("\n" + "="*80)
@@ -176,7 +272,7 @@ def load_all_data(config, args):
         print("\n✅ All datasets passed normalization check!")
     
     print("="*80)
-    return dataset_train_1channel, dataset_val_1channel, dataset_train_7channel, dataset_val_7channel
+    return dataset_train_1channel, dataset_val_1channel, dataset_train_7channel, dataset_val_7channel, dataset_Infinity
 
 
 def run_predictions(trainer, dataset, dataset_name, out_folder, args, threshold=0.5):
@@ -232,7 +328,7 @@ def main():
     # Correctly assign max_channels to the args object
     args.max_channels = config['max_channels']
     # First Stage: 1-channel data training
-    dataset_train_1channel, dataset_val_1channel, dataset_train_7channel, dataset_val_7channel = load_all_data(config, args)
+    dataset_train_1channel, dataset_val_1channel, dataset_train_7channel, dataset_val_7channel, tensor_label_list_Infinity = load_all_data(config, args)
 
 
     # ADD THESE LINES HERE
@@ -253,24 +349,27 @@ def main():
         name_flag=config['name_flag'] + 'Duramat'
     )
     
-    # run_predictions(trainer, dataset_val_1channel, '1-Channel_Validation', config['images_folder'], args)
+    run_predictions(trainer, dataset_val_1channel, '1-Channel_Validation', config['images_folder'], args)
 
     # Second Stage: 7-channel data fine-tuning
     print("\n----------------- STAGE 2: FINE-TUNING ON 7-CHANNEL DATA -----------------")
-  #  args.retrain = 'retrain'
-    args.batch_size = 10
-    trainer_7channel = retrain_resume_or_load_pretrained_second_stage(
-        args, 
-        config['current_dir'], 
-        config['input_model_folder'], 
-        config['device'], 
-        config['output_model_folder'],
-        concat_train=dataset_train_7channel, 
-        concat_val=dataset_val_7channel
-    )
+   # args.retrain = 'retrain'
+    # args.batch_size = 10
+    # trainer_7channel = retrain_resume_or_load_pretrained_second_stage(
+    #     args, 
+    #     config['current_dir'], 
+    #     config['input_model_folder'], 
+    #     config['device'], 
+    #     config['output_model_folder'],
+    #     concat_train=dataset_train_7channel, 
+    #     concat_val=dataset_val_7channel,
+    #     channels=7
+    # )
 
-    # Run predictions on the 7-channel validation set
-    run_predictions(trainer_7channel, dataset_val_7channel, '7-Channel_Validation', config['images_folder'], args)
+    # # Run predictions on the 7-channel validation set
+    run_predictions(trainer, dataset_val_7channel+dataset_train_7channel, '7-Channel_Validation', config['images_folder'], args)
+
+    run_predictions(trainer, tensor_label_list_Infinity, '7-tensor_label_list_Infinity', config['images_folder'], args)
     
     # Final Prediction on unlabeled data
     print("\n----------------- PREDICTION ON UNLABELED DATA -----------------")
@@ -296,13 +395,13 @@ def main():
     TISO_stats = check_raw_tensor_normalization(data_TISO_notlabeled, "Website", check_all=True)
     print(f"Website:  mean={TISO_stats['mean']:.4f}, std={TISO_stats['std']:.4f}, range=[{TISO_stats['min']:.2f}, {TISO_stats['max']:.2f}] - {TISO_stats['assessment']}")
 
-    dataset_tiso_notlabeled = PVDataset(data_TISO_notlabeled, channels=[config['channels']] * len(data_TISO_notlabeled), 
+    dataset_tiso_notlabeled = PVDataset(data_TISO_notlabeled, channels=[[0]] * len(data_TISO_notlabeled), 
                                         scale=1, return_labels=True)
-    predictions_tiso = trainer_7channel.predict(dataset_tiso_notlabeled) 
+    predictions_tiso = trainer.predict(dataset_tiso_notlabeled) 
     pred_labels_tiso = logits_to_classes_TISO(predictions_tiso, initial_threshold=0.9)
     predlabels_tiso = convert_list_of_arrays_to_labels(pred_labels_tiso)
     save_images_by_label(data_TISO_notlabeled, predlabels_tiso, 
-                         os.path.join(config['images_folder'], 'data_TISO_notlabeled_good_new3/'), 
+                         os.path.join(config['images_folder'], 'data_TISO_notlabeled_good_new6/'), 
                          flag='Website', name_flag=config['name_flag'])
     exit()
     # --- C14 DATA ---

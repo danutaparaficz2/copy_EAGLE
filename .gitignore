@@ -15,3 +15,7 @@ requirements.txt
 *.jpeg
 *.log
 results_*/
+logs/
+predictions/
+working*/
+saved*/

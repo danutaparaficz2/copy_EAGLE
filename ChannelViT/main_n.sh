@@ -15,8 +15,8 @@ COMMENT
 
 
 
-for seed in {1..5}
+for seed in {1..50}
 do
     echo "Running with seed $seed"
-    python main_n.py --seed "$seed" --retrain retrain_second_stage
+    python ../ChannelViT/main_n.py --seed "$seed" --retrain retrain_second_stage
 done

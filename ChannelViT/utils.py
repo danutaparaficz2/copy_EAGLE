@@ -1,4 +1,6 @@
 from sklearn.metrics import f1_score, accuracy_score, log_loss
+import os
+os.environ["TRANSFORMERS_NO_TF"] = "1"
 import torch
 from transformers import  EvalPrediction
 import numpy as np
@@ -1329,3 +1331,22 @@ def just_transform_with_norm_without_label(data, calculated_mean, calculated_std
         tensors.append(img_tensor_norm)
 
     return list(tensors)
+
+def _ensure_len(lbl, L=7):
+    # convert to numpy array
+    if hasattr(lbl, "numpy"):
+        arr = np.asarray(lbl.numpy())
+    else:
+        arr = np.asarray(lbl)
+    # scalar label -> one-hot
+    if arr.ndim == 0:
+        out = np.zeros(L, dtype=float)
+        out[int(arr)] = 1.0
+        return out
+    # truncate or pad to length L
+    if arr.size >= L:
+        return arr[:L].astype(float)
+    out = np.zeros(L, dtype=float)
+    out[:arr.size] = arr.astype(float)
+    return out
+

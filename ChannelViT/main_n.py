@@ -239,6 +239,7 @@ def main():
     # Correctly assign max_channels to the args object
     args.max_channels = config['max_channels']
     # First Stage: 1-channel data training
+    
     dataset_train_1channel, dataset_val_1channel, dataset_train_7channel, dataset_val_7channel = load_all_data(config, args)
 
 
