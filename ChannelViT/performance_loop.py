@@ -86,14 +86,15 @@ val_transforms = get_val_transforms()
 predictions_all = []
 label_ids_all = []
 folder_names = []
-for folder in ['23-P09-A', '23-P09-B', '23-P09-C', '23-P09-D', '23-P09-E', '23-P09-F', 
-               '23-P09-G', '23-P09-H', 'C14-A', 'C14-B', 'C14-C', 'C14-D', 'C14-F', 'C14-G', 
-               'C14-H', 'C14-I', 'C14-J', 'C14-K', 'Catamarano','PVVintage','TISO-EAGLE-23-P09_images', 
-               'Infinity-alpin1','Infinity-moderate4']:
+# for folder in ['23-P09-A', '23-P09-B', '23-P09-C', '23-P09-D', '23-P09-E', '23-P09-F', 
+#                '23-P09-G', '23-P09-H', 'C14-A', 'C14-B', 'C14-C', 'C14-D', 'C14-F', 'C14-G', 
+#                'C14-H', 'C14-I', 'C14-J', 'C14-K', 'Catamarano','PVVintage','TISO-EAGLE-23-P09_images', 
+#                'Infinity-alpin1','Infinity-moderate4']:
+for folder in ['23-P09-H']:
     ##### LOAD DATA FOR TRAINING AND VALIDATION #####
     print(f"\n================= Testing on folder: {folder} =================")
     path_Website = "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage"
-    data_loader_2 = Load_Data_Handler(path_Website, args, classified_by=["Ebrar", "Ralf"], folders_excluded=[folder]) #, '23-P09-C', '23-P09-D', '23-P09-E', 'C14-A', 'C14-C','C14-I'
+    data_loader_2 = Load_Data_Handler(path_Website, args, classified_by=["Ebrar", "Ralf"], folders_excluded=[folder,'PVVintage']) #, '23-P09-C', '23-P09-D', '23-P09-E', 'C14-A', 'C14-C','C14-I'
     data_Website = data_loader_2.get_data()
     label_counts_Website = count_data_per_class_in_labels(data_loader_2.labels_as_integers)
     total = sum(int(v) for _, v in label_counts_Website.items())
@@ -152,25 +153,110 @@ for folder in ['23-P09-A', '23-P09-B', '23-P09-C', '23-P09-D', '23-P09-E', '23-P
         config['output_model_folder'],
         concat_train=dataset_train_7channel, 
         concat_val=dataset_val_7channel,
-        folder=folder
+        folder="withoutPVVintage_"+folder
     )
 
-    ##### PREDICTION ON TEST SET #####
-    print("\n----------------- PREDICTION ON TEST SET -----------------")
-
-    predictions_web =trainer_7channel.predict(dataset_Website_test)
+    ##### EVALUATION ON TEST SET #####
+    predictions_web =trainer_7channel.predict(dataset_val_7channel)
     predlabels_web = predictions_web.predictions.argmax(axis=-1)
     predictions_web.metrics
+    num_labels = args.num_classes
+    import numpy as np
+    label_names  =  {  0: 'good',
+                1: 'crack',
+                2: 'cross',
+                3: 'dark',
+                4: 'corrosion',
+                5: 'discoloration',
+                6: 'delamination',
+            }
 
-    predictions_all.append(predictions_web.predictions)
-    label_ids_all.append(predictions_web.label_ids)
-    folder_names.append(folder)
+    # Evaluation cell - uses existing variables: predictions, num_labels, label_names (dict)
+    from sklearn.metrics import (f1_score, precision_score, recall_score,
+                                precision_recall_fscore_support, hamming_loss,
+                                multilabel_confusion_matrix, accuracy_score, roc_auc_score)
 
-collect_predictions = {
-    'folder': folder_names,
-    'predictions': predictions_all,
-    'label_ids': label_ids_all}
-    # Save or process collect_predictions in file
-save_path = os.path.join(config['current_dir'],  'predictions', f'predictions.pt')
-torch.save(collect_predictions, save_path)
-print(f"Predictions saved to {save_path}")
+    # prepare predictions and ground truth
+    logits = predictions_web.predictions
+    if isinstance(logits, (tuple, list)):
+        logits = logits[0]
+    probs = 1.0 / (1.0 + np.exp(-logits))
+    preds = (probs > 0.5).astype(int)
+    true = predictions_web.label_ids.astype(int)
+
+    # overall multi-label metrics
+    metrics = {
+        "f1_micro": f1_score(true, preds, average="micro"),
+        "f1_macro": f1_score(true, preds, average="macro"),
+        "precision_micro": precision_score(true, preds, average="micro", zero_division=0),
+        "recall_micro": recall_score(true, preds, average="micro", zero_division=0),
+        "hamming_loss": hamming_loss(true, preds),
+        "subset_accuracy": float(np.mean(np.all(true == preds, axis=1))),
+    }
+    print("Overall metrics:")
+    for k, v in metrics.items():
+        print(f"  {k}: {v:.4f}")
+
+    # per-class precision/recall/f1/support
+    prec, rec, f1, sup = precision_recall_fscore_support(true, preds, average=None, zero_division=0)
+    print("\nPer-class metrics:")
+    for i in range(num_labels):
+        name = label_names.get(i, str(i)) if isinstance(label_names, dict) else str(i)
+        print(f"  [{i}] {name:12s}  precision={prec[i]:.3f}  recall={rec[i]:.3f}  f1={f1[i]:.3f}  support={int(sup[i])}")
+
+    # per-class confusion components (TN, FP, FN, TP)
+    mlcm = multilabel_confusion_matrix(true, preds)
+    print("\nPer-class confusion (TN, FP, FN, TP):")
+    for i, cm in enumerate(mlcm):
+        tn, fp, fn, tp = cm.ravel()
+        name = label_names.get(i, str(i)) if isinstance(label_names, dict) else str(i)
+        print(f"  [{i}] {name:12s}  TN={tn:5d}  FP={fp:5d}  FN={fn:5d}  TP={tp:5d}")
+
+    # top-1 accuracy on examples that are single-label in ground truth
+    single_mask = (true.sum(axis=1) == 1)
+    if single_mask.any():
+        true_single = true[single_mask].argmax(axis=1)
+        pred_single = preds[single_mask].argmax(axis=1)
+        top1_acc = accuracy_score(true_single, pred_single)
+        print(f"\nTop-1 accuracy on single-label examples: {top1_acc:.4f}  (n={int(single_mask.sum())})")
+    else:
+        print("\nNo single-label examples found for top-1 accuracy.")
+
+    # try ROC-AUC per class if applicable
+    try:
+        aucs = []
+        for i in range(num_labels):
+            # require both positive and negative labels for AUC
+            if len(np.unique(true[:, i])) > 1:
+                aucs.append(roc_auc_score(true[:, i], probs[:, i]))
+            else:
+                aucs.append(np.nan)
+        print("\nPer-class ROC AUC:")
+        for i, a in enumerate(aucs):
+            name = label_names.get(i, str(i)) if isinstance(label_names, dict) else str(i)
+            print(f"  [{i}] {name:12s}  AUC={a if np.isnan(a) else f'{a:.4f}'}")
+    except Exception as e:
+        print("\nROC AUC skipped due to error:", e)
+
+
+
+        ##### PREDICTION ON TEST SET #####
+
+    #     print("\n----------------- PREDICTION ON TEST SET -----------------")
+
+    #     predictions_web =trainer_7channel.predict(dataset_Website_test)
+    #     predlabels_web = predictions_web.predictions.argmax(axis=-1)
+    #     predictions_web.metrics
+
+    #     predictions_all.append(predictions_web.predictions)
+    #     label_ids_all.append(predictions_web.label_ids)
+    #     folder_names.append(folder)
+
+    # collect_predictions = {
+    #     'folder': folder_names,
+    #     'predictions': predictions_all,
+    #     'label_ids': label_ids_all}
+    #     # Save or process collect_predictions in file
+    # save_path = os.path.join(config['current_dir'],  'predictions', f'predictions.pt')
+    # torch.save(collect_predictions, save_path)
+    # print(f"Predictions saved to {save_path}")

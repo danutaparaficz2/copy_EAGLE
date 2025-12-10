@@ -183,7 +183,7 @@ def normalize_image_0_255(files_by_folder, PATH, tech, this_folders_only=[], fol
 
         else:   
             num_files = len(files)
-            npz_path = os.path.join('../Data/images/', f'normalized_{folder}_{tech}.npz')
+            npz_path = os.path.join('Data/images/', f'normalized_{folder}_{tech}.npz')
             # If a cached normalized file exists for this folder+tech, load and reuse it
             if os.path.exists(npz_path):
                 try:

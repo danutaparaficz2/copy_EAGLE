@@ -97,7 +97,7 @@ def load_all_data(config, args):
     tensor_label_list_Website = just_transform_with_norm(filtered_data['data_Website_filtered'] + filtered_data['data_Website_Ralf_filtered'], calculated_mean=calculated_mean, calculated_std=calculated_std)
 
 
-######################
+    ######################
     cleaned_1channel_data = tensor_label_list_Duramat + tensor_label_list_Infinity
     cleaned_7channel_data = tensor_label_list_Website
 

@@ -202,8 +202,8 @@ def load_post_trained_model(args, folder, device, weights_path, num_classes):
                         # Calculate mean vector and repeat it for the new channels
                         #fill_vec = old.mean(dim=0, keepdim=True).repeat(new_ch - old_ch, 1)
                         ######## Extract channel 0's weights and repeat it for the new channels (new_ch - old_ch)
-                        fill_vec = old[0:1].repeat(new_ch - old_ch, 1)
-                        new_emb[old_ch:] = fill_vec
+                        fill_vec = old[0:1].repeat(new_ch - 1, 1)
+                        new_emb[1:] = fill_vec
                         
                     state_dict[emb_key] = new_emb
             else:
@@ -271,19 +271,19 @@ def retrain_resume_or_load_pretrained_second_stage(args, current_dir, input_mode
             trainer,
             concat_train,   # train_dataset (should be your ConcatDataset)
             concat_val,     # val_dataset (should be your ConcatDataset)
-            current_dir+output_model_folder+'/phase_b_7/'+folder+'/',
+            current_dir+output_model_folder+'/phase_b_7_test/'+folder+'/',
             save=False
         )
         # Unfreeze all layers for Phase B
         model = unfreeze_for_phase_b(model)
-        args.num_train_epochs = 75
+        args.num_train_epochs = 45
 
         trainer = init_trainer(args, model, concat_val,  current_dir+output_model_folder)
         trainer = train_save_model(
             trainer,
             concat_train,   # train_dataset (should be your ConcatDataset)
             concat_val,     # val_dataset (should be your ConcatDataset)
-            current_dir+output_model_folder+'/phase_b_7/'+folder+'/',
+            current_dir+output_model_folder+'/phase_b_7_test/'+folder+'/',
             save=True
         )
 
