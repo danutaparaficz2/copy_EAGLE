@@ -183,50 +183,74 @@ def load_post_trained_model(args, folder, device, weights_path, num_classes):
         state_dict = state.get('state_dict', state) if isinstance(state, dict) else state
         
         # Load ImageNet pretrained model for channels 1-3
-        state1 = torch.load('/Users/eagle/Documents/eagle-classification/eagle-classification/Data/models/'+args.init_weights_name+'.pth', map_location=device)
+        imagenet_file = '/Users/eagle/Documents/eagle-classification/Data/models/'+args.init_weights_name+'.pth'
+        state1 = torch.load(imagenet_file, map_location=device)
         state_dict1 = state1.get('state_dict', state1) if isinstance(state1, dict) else state1
         
         emb_key = 'patch_embed.channel_embed.weight'
-        if emb_key in state_dict:
-            old = state_dict[emb_key]      # Defect-trained model (for channel 0)
-            old1 = state_dict1[emb_key]    # ImageNet-trained model (for channels 1-3)
+        if emb_key in state_dict and emb_key in state_dict1:
+            old = state_dict[emb_key]      # Shape: (1, dim) - only channel 0 from Stage 1
+            old1 = state_dict1[emb_key]    # Shape: (N, dim) - RGB/multi-channel from ImageNet
+            
+            print(f"\n=== Channel Embedding Initialization ===")
+            print(f"Stage 1 channel embedding shape: {old.shape}")
+            print(f"ImageNet channel embedding shape: {old1.shape}")
             
             if old.ndim == 2:
                 old_ch, dim = old.shape
-                new_ch = model.patch_embed.channel_embed.num_embeddings  # Should be 4
+                new_ch = 4  # We need 4 channels now
                 
-                if old_ch != new_ch or old1.shape[0] != new_ch:
-                    print(f"Adapting channel_embed: old {old_ch} channels, old1 {old1.shape[0]} channels -> model {new_ch} channels")
-                    
-                    # Create new embedding tensor for 4 channels
-                    new_emb = torch.zeros((new_ch, dim), dtype=old.dtype, device=old.device)
-                    
-                    # Channel 0: Use embedding from 'old' (defect-trained model)
-                    new_emb[0:1] = old[0:1]
-                    
-                    # Channels 1-3: Use embeddings from 'old1' (ImageNet)
-                    if old1.shape[0] >= 3:
-                        # If old1 has at least 3 channels, use them directly
-                        new_emb[1:4] = old1[0:3]
-                    elif old1.shape[0] == 1:
-                        # If old1 only has 1 channel (grayscale), repeat it for channels 1-3
-                        new_emb[1:4] = old1[0:1].repeat(3, 1)
-                    else:
-                        # Fallback: repeat available channels from old1
-                        new_emb[1:4] = old1[:min(3, old1.shape[0])].repeat(3 // old1.shape[0] + 1, 1)[:3]
-                    
-                    state_dict[emb_key] = new_emb
-                    
-                    print(f"Channel embedding initialization:")
-                    print(f"  - Channel 0: from 'old' (defect-trained)")
-                    print(f"  - Channels 1-3: from 'old1' (ImageNet pretrained)")
+                # Create new embedding tensor for 4 channels
+                new_emb = torch.zeros((new_ch, dim), dtype=old.dtype, device=old.device)
+                
+                # Channel 0: Use embedding from Stage 1 (defect-trained, EL channel)
+                new_emb[0] = old[0]
+                print(f"✓ Channel 0: from Stage 1 (EL, defect-trained)")
+                print(f"  Norm: {torch.norm(old[0]):.4f}")
+                
+                # Channels 1-3: Use embeddings from ImageNet (RGB channels)
+                if old1.shape[0] >= 3:
+                    new_emb[1:4] = old1[0:3]
+                    print(f"✓ Channels 1-3: from ImageNet (RGB pretrained)")
+                    for i in range(3):
+                        print(f"  Channel {i+1} norm: {torch.norm(old1[i]):.4f}")
+                else:
+                    # Fallback: replicate channel 0 embedding
+                    print(f"⚠ Warning: ImageNet model has only {old1.shape[0]} channels, replicating channel 0")
+                    new_emb[1:4] = old[0].unsqueeze(0).repeat(3, 1)
+                
+                state_dict[emb_key] = new_emb
+                
+                print(f"\nChannel embedding initialization summary:")
+                print(f"  Channel 0 norm: {torch.norm(new_emb[0]):.4f} (from Stage 1)")
+                print(f"  Channel 1 norm: {torch.norm(new_emb[1]):.4f} (from ImageNet)")
+                print(f"  Channel 2 norm: {torch.norm(new_emb[2]):.4f} (from ImageNet)")
+                print(f"  Channel 3 norm: {torch.norm(new_emb[3]):.4f} (from ImageNet)")
+                
+                # Verify embeddings are differentiated
+                similarities = []
+                for i in range(4):
+                    for j in range(i+1, 4):
+                        sim = torch.cosine_similarity(new_emb[i], new_emb[j], dim=0).item()
+                        similarities.append(sim)
+                        if i == 0:  # Only print channel 0 similarities
+                            print(f"  Similarity Ch0-Ch{j}: {sim:.4f}")
+                
+                if max(similarities) > 0.99:
+                    print("⚠ WARNING: Some channel embeddings are too similar (>0.99)!")
+                else:
+                    print("✓ Channel embeddings are properly differentiated")
+                print("="*50)
             else:
                 print(f"Unexpected embedding tensor shape for {emb_key}: {old.shape}")
 
         # Load state dict with non-strict (to accept new head and adapted embeddings)
         missing, unexpected = model.load_state_dict(state_dict, strict=False)
-        print("Loaded pretrained weights (non-strict). Missing keys:", missing)
-        print("Unexpected keys in state_dict:", unexpected)
+        print("\nLoaded pretrained weights (non-strict).")
+        if missing:
+            print(f"Missing keys: {missing}")
+        if unexpected:
+            print(f"Unexpected keys: {unexpected}")
         
         # --- Adaptive Fine-Tuning Stage 2, Phase A (Warm-up) Setup ---
         print("\n--- Initializing Phase A: Warm-up (Head & Channel Embeddings Trainable) ---")
