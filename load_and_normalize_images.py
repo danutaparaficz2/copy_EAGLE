@@ -308,7 +308,7 @@ def main():
                 specific_images_sorted = sorted(specific_images, key=lambda x: extract_cell_number(x[0]))
                 n_images = len(specific_images_sorted)
                 n_rows, n_cols = 5, 8
-                fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols * 2, n_rows * 2))
+                fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols * 1, n_rows * 1))
                 for idx, (fname, norm_img, orig_img) in enumerate(specific_images_sorted):
                     if idx >= n_rows * n_cols:
                         break
@@ -327,7 +327,7 @@ def main():
                     col = idx % n_cols
                     axes[row, col].axis('off')
                 plt.tight_layout()
-                plt.savefig(grid_dir / f'{group}_{band}_grid.jpg', dpi=150, bbox_inches='tight')
+                plt.savefig(grid_dir / f'{group}_{band}_grid.jpg', dpi=72, bbox_inches='tight')
                 plt.close(fig)
                 print(f'Saved: {grid_dir}/{group}_{band}_grid.jpg')
 if __name__ == '__main__':
