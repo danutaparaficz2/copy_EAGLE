@@ -102,6 +102,23 @@ def convert_to_one_hot(labels, num_classes=4):
     
     return one_hot_labels.float()
 
+def convert_multilabels_to_one_hot(data, num_classes=5):
+    converted_data = []
+    for item in data:
+        image, label = item
+
+        label_index = [label]
+        if isinstance(label, list):
+            print(label)
+            label_one = convert_to_one_hot(label, num_classes=num_classes)
+            label_one = label_one.sum(axis=0)
+        else:
+            label_one = convert_to_one_hot(label_index, num_classes=num_classes)
+            label_one = label_one.sum(axis=0)
+        # make it a tensor
+        # label_one = torch.tensor(label_one, dtype=torch.float32)
+        converted_data.append((image, label_one))
+    return converted_data
 
 def convert_labels_to_one_hot(data, num_classes=5):
     converted_data = []

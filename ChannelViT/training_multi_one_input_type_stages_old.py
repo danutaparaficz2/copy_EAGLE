@@ -168,7 +168,7 @@ def load_model(args, folder, device, weights_path, num_classes):
 
   # Load the model
 def load_post_trained_model(args, folder, device, weights_path, num_classes):
-    model = hcs_channelvit_small(patch_size= args.patch_size, in_chans=4)
+    model = hcs_channelvit_small(patch_size= args.patch_size, in_chans=7)
     # num_classes = 4  # Replace with the actual number of classes in your dataset
     model.head = nn.Linear(model.norm.normalized_shape[0], num_classes)
 
@@ -181,76 +181,38 @@ def load_post_trained_model(args, folder, device, weights_path, num_classes):
         print(f"Loading pretrained weights from {pretrained_file} and adapting channel embeddings...")
         state = torch.load(pretrained_file, map_location=device)
         state_dict = state.get('state_dict', state) if isinstance(state, dict) else state
-        
-        # Load ImageNet pretrained model for channels 1-3
-        imagenet_file = '/Users/eagle/Documents/eagle-classification/Data/models/'+args.init_weights_name+'.pth'
-        state1 = torch.load(imagenet_file, map_location=device)
-        state_dict1 = state1.get('state_dict', state1) if isinstance(state1, dict) else state1
-        
+
         emb_key = 'patch_embed.channel_embed.weight'
-        if emb_key in state_dict and emb_key in state_dict1:
-            old = state_dict[emb_key]      # Shape: (1, dim) - only channel 0 from Stage 1
-            old1 = state_dict1[emb_key]    # Shape: (N, dim) - RGB/multi-channel from ImageNet
-            
-            print(f"\n=== Channel Embedding Initialization ===")
-            print(f"Stage 1 channel embedding shape: {old.shape}")
-            print(f"ImageNet channel embedding shape: {old1.shape}")
-            
+        if emb_key in state_dict:
+            old = state_dict[emb_key]
             if old.ndim == 2:
                 old_ch, dim = old.shape
-                new_ch = 4  # We need 4 channels now
+                new_ch = model.patch_embed.channel_embed.num_embeddings
                 
-                # Create new embedding tensor for 4 channels
-                new_emb = torch.zeros((new_ch, dim), dtype=old.dtype, device=old.device)
-                
-                # Channel 0: Use embedding from Stage 1 (defect-trained, EL channel)
-                new_emb[0] = old[0]
-                print(f"✓ Channel 0: from Stage 1 (EL, defect-trained)")
-                print(f"  Norm: {torch.norm(old[0]):.4f}")
-                
-                # Channels 1-3: Use embeddings from ImageNet (RGB channels)
-                if old1.shape[0] >= 3:
-                    new_emb[1:4] = old1[0:3]
-                    print(f"✓ Channels 1-3: from ImageNet (RGB pretrained)")
-                    for i in range(3):
-                        print(f"  Channel {i+1} norm: {torch.norm(old1[i]):.4f}")
-                else:
-                    # Fallback: replicate channel 0 embedding
-                    print(f"⚠ Warning: ImageNet model has only {old1.shape[0]} channels, replicating channel 0")
-                    new_emb[1:4] = old[0].unsqueeze(0).repeat(3, 1)
-                
-                state_dict[emb_key] = new_emb
-                
-                print(f"\nChannel embedding initialization summary:")
-                print(f"  Channel 0 norm: {torch.norm(new_emb[0]):.4f} (from Stage 1)")
-                print(f"  Channel 1 norm: {torch.norm(new_emb[1]):.4f} (from ImageNet)")
-                print(f"  Channel 2 norm: {torch.norm(new_emb[2]):.4f} (from ImageNet)")
-                print(f"  Channel 3 norm: {torch.norm(new_emb[3]):.4f} (from ImageNet)")
-                
-                # Verify embeddings are differentiated
-                similarities = []
-                for i in range(4):
-                    for j in range(i+1, 4):
-                        sim = torch.cosine_similarity(new_emb[i], new_emb[j], dim=0).item()
-                        similarities.append(sim)
-                        if i == 0:  # Only print channel 0 similarities
-                            print(f"  Similarity Ch0-Ch{j}: {sim:.4f}")
-                
-                if max(similarities) > 0.99:
-                    print("⚠ WARNING: Some channel embeddings are too similar (>0.99)!")
-                else:
-                    print("✓ Channel embeddings are properly differentiated")
-                print("="*50)
+                if old_ch != new_ch:
+                    print(f"Adapting channel_embed: pretrained {old_ch} -> model {new_ch}")
+                    
+                    # Create new embedding tensor
+                    new_emb = torch.zeros((new_ch, dim), dtype=old.dtype, device=old.device)
+                    # Copy existing channels
+                    new_emb[:old_ch] = old
+                    
+                    # SCIENTIFIC REVISION: Fill extras with the mean of existing channels
+                    if old_ch > 0:
+                        # Calculate mean vector and repeat it for the new channels
+                        #fill_vec = old.mean(dim=0, keepdim=True).repeat(new_ch - old_ch, 1)
+                        ######## Extract channel 0's weights and repeat it for the new channels (new_ch - old_ch)
+                        fill_vec = old[0:1].repeat(new_ch - 1, 1)
+                        new_emb[1:] = fill_vec
+                        
+                    state_dict[emb_key] = new_emb
             else:
                 print(f"Unexpected embedding tensor shape for {emb_key}: {old.shape}")
 
         # Load state dict with non-strict (to accept new head and adapted embeddings)
         missing, unexpected = model.load_state_dict(state_dict, strict=False)
-        print("\nLoaded pretrained weights (non-strict).")
-        if missing:
-            print(f"Missing keys: {missing}")
-        if unexpected:
-            print(f"Unexpected keys: {unexpected}")
+        print("Loaded pretrained weights (non-strict). Missing keys:", missing)
+        print("Unexpected keys in state_dict:", unexpected)
         
         # --- Adaptive Fine-Tuning Stage 2, Phase A (Warm-up) Setup ---
         print("\n--- Initializing Phase A: Warm-up (Head & Channel Embeddings Trainable) ---")
@@ -261,7 +223,7 @@ def load_post_trained_model(args, folder, device, weights_path, num_classes):
         # 2. Explicitly unfreeze the parameters for Phase A training:
         # The new classification head (crucial for the new task)
         model.head.requires_grad_(True)
-        # The adapted channel embeddings (crucial for the 4-channel input)
+        # The adapted channel embeddings (crucial for the 7-channel input)
         model.patch_embed.channel_embed.weight.requires_grad_(True)
         
         # 3. Print verification of trainable parameters
@@ -309,19 +271,19 @@ def retrain_resume_or_load_pretrained_second_stage(args, current_dir, input_mode
             trainer,
             concat_train,   # train_dataset (should be your ConcatDataset)
             concat_val,     # val_dataset (should be your ConcatDataset)
-            current_dir+output_model_folder+'/phase_b_7/'+folder+'/',
+            current_dir+output_model_folder+'/phase_b_7_test/'+folder+'/',
             save=False
         )
         # Unfreeze all layers for Phase B
         model = unfreeze_for_phase_b(model)
-        args.num_train_epochs = 75
+        args.num_train_epochs = 45
 
         trainer = init_trainer(args, model, concat_val,  current_dir+output_model_folder)
         trainer = train_save_model(
             trainer,
             concat_train,   # train_dataset (should be your ConcatDataset)
             concat_val,     # val_dataset (should be your ConcatDataset)
-            current_dir+output_model_folder+'/phase_b_7/'+folder+'/',
+            current_dir+output_model_folder+'/phase_b_7_test/'+folder+'/',
             save=True
         )
 
