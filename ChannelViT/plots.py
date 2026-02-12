@@ -2,11 +2,15 @@ import os
 import json
 import torch
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
 import pandas as pd
 from PIL import Image
 from sklearn.metrics import multilabel_confusion_matrix, ConfusionMatrixDisplay, confusion_matrix
 from utils import label_names, normalize_image, find_optimal_grid, select_images_by_label
+
+# Configure matplotlib to suppress the warning and manage memory better
+matplotlib.rcParams['figure.max_open_warning'] = 0
 
 
 
@@ -179,6 +183,7 @@ def plot_samples_from_specific_label(ds, selected_predlabels, label_to_filter, d
         if os.path.exists(outfolder) == False:
             os.makedirs(outfolder)
         plt.savefig(outfolder+f'/samples_{data_name}_label_{label_name}_{channel_name}.png')
+        plt.close(fig)
 
 # def find_last_checkpoint(output_dir):
 #     # List all checkpoint directories
@@ -289,7 +294,7 @@ def plot_samples_from_specific_label_with_acc(ds_val, predlabels, label_to_filte
         else:
             non_matching_indices.append(i)
 
-    print(matching_indices, non_matching_indices)
+   # print(matching_indices, non_matching_indices)
     if correct:
         if len(matching_indices) > 36:
             indices_to_use = np.random.choice(matching_indices, 36, replace=False)
@@ -343,6 +348,7 @@ def plot_samples_from_specific_label_with_acc(ds_val, predlabels, label_to_filte
     plt.suptitle(f'Data from {data_name}. Class Accuracy: {class_accuracies.get(label_to_filter, 0):.3f}', fontsize=30)
 
     plt.savefig(outfolder+f'/samples_{data_name}_label_{str(label_to_filter)}_{flag}.png')
+    plt.close(fig)
 
 
 
@@ -353,7 +359,7 @@ def plot_multilabel_confusion_matrix(true_labels, predicted_labels, class_names,
     mcm = multilabel_confusion_matrix(true_labels, predicted_labels)
     print(mcm)
     for i, (cm, class_name) in enumerate(zip(mcm, class_names)):
-        plt.figure()
+        fig = plt.figure()
         disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=[f'not {class_name}', class_name])
         disp.plot(cmap='Blues')
         plt.title(f'Confusion Matrix for class: {class_name}')
@@ -403,6 +409,7 @@ def plot_normalized_confusion_matrix(true_labels, predicted_labels, class_names,
     # Save the plot if output_path is provided
     if output_path:
         plt.savefig(output_path)
+        plt.close()
 
     return normalized_cm
 
@@ -421,11 +428,12 @@ def confusion_matrix_per_class(pred_labels, true_labels, plot=False, normalize=F
         print(title)
         print( [class_idx])
         if plot:
-            plt.figure(figsize=(8, 6))
+            fig = plt.figure(figsize=(8, 6))
             disp = ConfusionMatrixDisplay(confusion_matrix=cm[class_idx])
             disp.plot()
             plt.title(title)
             plt.savefig(f"confusion_matrix_class_{class_idx}.png")
+            plt.close(fig)
     return cm
 
 

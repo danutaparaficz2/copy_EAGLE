@@ -1237,7 +1237,14 @@ def calculate_per_channel_stats(data, resize_to=(224, 224)):
 
         if isinstance(img, np.ndarray):
             # If shape is (H, W, C) and C > 4, process each channel separately
-            if img.ndim == 3 and img.shape[-1] > 4:
+            if img.ndim == 3 and img.shape[-1] == 224:
+                channels = []
+                for ch in range(img.shape[0]):
+                    channel_img = Image.fromarray(img[ch, :, :].astype(np.uint8), mode='L')
+                    channel_tensor = resize_transform(channel_img)  # (1, H, W)
+                    channels.append(channel_tensor)
+                img_tensor = torch.cat(channels, dim=0)  # (C, H, W)
+            elif img.ndim == 3 and img.shape[-1] > 4:
                 channels = []
                 for ch in range(img.shape[-1]):
                     channel_img = Image.fromarray(img[:, :, ch].astype(np.uint8), mode='L')

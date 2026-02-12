@@ -128,8 +128,8 @@ def run_predictions(trainer, dataset, dataset_name, out_folder, args, threshold=
 
     class_accuracies = {}
     for label in range(args.num_classes):
-        label_name, class_accuracies[label], length = calculate_class_accuracy_one_hot(true_labels, pred_labels, class_label=label)
-        print(f"Class '{label_name}': accuracy={class_accuracies[label]:.2f}, count={length}")
+            label_name, class_accuracies[label], length = calculate_class_accuracy_one_hot(true_labels, pred_labels, class_label=label)
+            print(f"Class '{label_name}': accuracy={class_accuracies[label]:.2f}, count={length}")
 
     plot_samples_from_all_labels_with_acc(dataset_filtered, predlabels, class_accuracies, data_name=dataset_name, 
                                             outfolder=out_folder, certainty=torch.sigmoid(torch.tensor(predictions[0])).numpy())
@@ -164,23 +164,23 @@ def run_predictions(trainer, dataset, dataset_name, out_folder, args, threshold=
 
     # top-1 accuracy on examples that are single-label in ground truth
 
-    if len(true_labels) > 0:
-        save_predictions(true_labels, pred_labels, prob, fold, dataset_name)
-        '''
-        class_names = label_names()
-        plot_multilabel_confusion_matrix(true_labels, pred_labels, class_names, output_path=os.path.join(out_folder, f'{dataset_name}_confusion_matrix.png'))
+    # if len(true_labels) > 0:
+    #     save_predictions(true_labels, pred_labels, prob, fold, dataset_name)
+    #     '''
+    #     class_names = label_names()
+    #     plot_multilabel_confusion_matrix(true_labels, pred_labels, class_names, output_path=os.path.join(out_folder, f'{dataset_name}_confusion_matrix.png'))
         
-        print('################# ACCURACIES #################')
-        class_accuracies = {}
-        for label in range(args.num_classes):
-            label_name, class_accuracies[label], length = calculate_class_accuracy_one_hot(true_labels, pred_labels, class_label=label)
-            print(f"Class '{label_name}': accuracy={class_accuracies[label]:.2f}, count={length}")
+    #     print('################# ACCURACIES #################')
+    #     class_accuracies = {}
+    #     for label in range(args.num_classes):
+    #         label_name, class_accuracies[label], length = calculate_class_accuracy_one_hot(true_labels, pred_labels, class_label=label)
+    #         print(f"Class '{label_name}': accuracy={class_accuracies[label]:.2f}, count={length}")
 
-        plot_samples_from_all_labels_with_acc(dataset_filtered, predlabels, class_accuracies, data_name=dataset_name, 
-                                            outfolder=out_folder, certainty=torch.sigmoid(torch.tensor(predictions[0])).numpy())
-        '''
-    else:
-        print(f"No samples left for evaluation after filtering. Skipping plots.")
+    #     plot_samples_from_all_labels_with_acc(dataset_filtered, predlabels, class_accuracies, data_name=dataset_name, 
+    #                                         outfolder=out_folder, certainty=torch.sigmoid(torch.tensor(predictions[0])).numpy())
+    #     '''
+    # else:
+    #     print(f"No samples left for evaluation after filtering. Skipping plots.")
 
 
 def save_predictions(true_labels, pred_labels, prob, fold, data_name):
@@ -219,7 +219,8 @@ def prepare_datasets_once(config, args):
     data_Infinity = convert_labels_to_one_hot(data_Infinity_int, num_classes=num_classes)
 
     data_Website = []
-    cpkl_website_path = "/Users/eagle/Documents/eagle-classification/Data/dataset_arrays_23-P09-D.pkl"
+    cpkl_website_test_path = "/Users/eagle/Documents/eagle-classification/OPENAI/23-P09-D/dataset_arrays_23-P09-D.pkl"
+    cpkl_website_path = "/Users/eagle/Documents/eagle-classification/OPENAI/24-P10-A/dataset_arrays_24-P10-A.pkl"
     import pandas as pd
     try:
         df_Website = pd.read_pickle(cpkl_website_path)
@@ -240,6 +241,26 @@ def prepare_datasets_once(config, args):
             df_Website = CustomUnpickler(f).load()
     
     data_Website = convert_multilabels_to_one_hot(df_Website, num_classes=num_classes)
+
+    try:
+        df_Website_test = pd.read_pickle(cpkl_website_test_path)
+    except ModuleNotFoundError as e:
+        print(f"Error loading pickle: {e}")
+        print("Attempting to load with compatibility mode...")
+        # Alternative: use pickle directly with custom unpickler
+        import pickle
+        
+        class CustomUnpickler(pickle.Unpickler):
+            def find_class(self, module, name):
+                # Redirect old numpy modules to new ones
+                if module.startswith('numpy._core'):
+                    module = module.replace('numpy._core', 'numpy.core')
+                return super().find_class(module, name)
+        
+        with open(cpkl_website_test_path, 'rb') as f:
+            df_Website_test = CustomUnpickler(f).load()
+    
+    df_Website_test = convert_multilabels_to_one_hot(df_Website_test, num_classes=num_classes)
     # Data is already in (C, H, W) format with shape (4, H, W)
     # No permutation needed - channels remain as [0, 1, 2, 3]
 
@@ -249,13 +270,17 @@ def prepare_datasets_once(config, args):
     calculated_mean, calculated_std = calculate_per_channel_stats(data_Website)
     tensor_label_list_Website = just_transform_with_norm(data_Website, calculated_mean=calculated_mean, calculated_std=calculated_std)
 
+    calculated_mean, calculated_std = calculate_per_channel_stats(df_Website_test)
+    tensor_label_list_Website_test = just_transform_with_norm(df_Website_test, calculated_mean=calculated_mean, calculated_std=calculated_std)
+
     cleaned_1channel_data = tensor_label_list_Duramat + tensor_label_list_Infinity
     cleaned_7channel_data = tensor_label_list_Website
     # Check all tensor data normalization
     duramat_stats = check_raw_tensor_normalization(tensor_label_list_Duramat, "Duramat", check_all=True)
     infinity_stats = check_raw_tensor_normalization(tensor_label_list_Infinity, "Infinity", check_all=True)  
     website_stats = check_raw_tensor_normalization(tensor_label_list_Website, "Website", check_all=True)
-    
+    website_test_stats = check_raw_tensor_normalization(tensor_label_list_Website_test, "Website", check_all=True)
+
     print("\n" + "="*60)
     print("RAW DATA SUMMARY:")
     print("="*60)
@@ -265,6 +290,8 @@ def prepare_datasets_once(config, args):
         print(f"Infinity: mean={infinity_stats['mean']:.4f}, std={infinity_stats['std']:.4f}, range=[{infinity_stats['min']:.2f}, {infinity_stats['max']:.2f}] - {infinity_stats['assessment']}")
     if website_stats:
         print(f"Website:  mean={website_stats['mean']:.4f}, std={website_stats['std']:.4f}, range=[{website_stats['min']:.2f}, {website_stats['max']:.2f}] - {website_stats['assessment']}")
+    if website_test_stats:
+        print(f"Website:  mean={website_test_stats['mean']:.4f}, std={website_test_stats['std']:.4f}, range=[{website_test_stats['min']:.2f}, {website_test_stats['max']:.2f}] - {website_test_stats['assessment']}")
     print("="*80)
 
     # static split for 1-channel (done once)
@@ -283,9 +310,10 @@ def prepare_datasets_once(config, args):
     full_dataset_7ch = PVDataset(cleaned_7channel_data, channels=channels_4ch, scale=1, return_labels=True, transform=train_transforms)
     # create a validation-version that uses val transforms for evaluation
     full_dataset_7ch_eval = PVDataset(cleaned_7channel_data, channels=channels_4ch, scale=1, return_labels=True, transform=val_transforms)
+    full_dataset_7ch_test = PVDataset(tensor_label_list_Website_test, channels=channels_4ch, scale=1, return_labels=True, transform=val_transforms)
 
     print(f"Prepared datasets: 1ch train={len(full_dataset_train_1ch)}, 1ch val={len(full_dataset_val_1ch)}, 7ch total={len(full_dataset_7ch)}")
-    return full_dataset_train_1ch, full_dataset_val_1ch, full_dataset_7ch, full_dataset_7ch_eval, cleaned_7channel_data
+    return full_dataset_train_1ch, full_dataset_val_1ch, full_dataset_7ch, full_dataset_7ch_eval, cleaned_7channel_data, full_dataset_7ch_test
 
 def main():
     warnings.filterwarnings("ignore", category=UserWarning)
@@ -302,7 +330,7 @@ def main():
     # shuffle=True is important to ensure randomness before splitting.
     K = 5
 
-    full_train_1ch, full_val_1ch, full_7ch, full_7ch_eval, cleaned_7channel_data = prepare_datasets_once(config, args)
+    full_train_1ch, full_val_1ch, full_7ch, full_7ch_eval, cleaned_7channel_data, full_7ch_test = prepare_datasets_once(config, args)
 
     N_total_samples = len(cleaned_7channel_data)
     dummy_data = np.arange(N_total_samples)
@@ -360,7 +388,7 @@ def main():
 
         #run_predictions(trainer, dataset_val_1channel, '1-Channel_Validation', config['images_folder'], args)
         run_predictions(trainer, full_7ch_eval, '7-Channel_Validation', config['images_folder'], args, fold=fold)
-            
+        run_predictions(trainer, full_7ch_eval, '7-Channel_Validation', config['images_folder'], args, fold=fold)    
 
         # exit()
         # Second Stage: 7-channel data fine-tuning
@@ -382,6 +410,7 @@ def main():
         # Run predictions on the 7-channel validation set
         run_predictions(trainer_7channel, dataset_val_7channel, '7-Channel_Validation', config['images_folder'], args, fold=fold)
         run_predictions(trainer_7channel, dataset_val_1channel, '1-Channel_Validation', config['images_folder'], args, fold=fold)
+        run_predictions(trainer_7channel, full_7ch_test, '7-Channel_TEST', config['images_folder'], args, fold=fold)
         exit()
         # cleanup to avoid memory growth
         try:

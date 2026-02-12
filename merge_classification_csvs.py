@@ -299,7 +299,7 @@ def export_arrays_for_keys(keys, el_dir: Path, vi_dir: Path, out_dir: Path, no_v
     return written, skipped
 
 
-def create_grid_visualization(images: List[str], category: str, output_path: str, thumb_size: int = 150, cols: int = 5):
+def create_grid_visualization(images: List[str], category: str, output_path: str, thumb_size: int = 360, cols: int = 5):
     """Create a grid visualization of images."""
     if not images:
         print(f"  No images for category: {category}")
@@ -309,19 +309,21 @@ def create_grid_visualization(images: List[str], category: str, output_path: str
     rows = math.ceil(n / cols)
     
     # Create canvas
-    canvas_width = cols * thumb_size + (cols + 1) * 10
-    canvas_height = rows * thumb_size + (rows + 1) * 10 + 50  # +50 for title
+    pad = 24
+    title_pad = 80
+    canvas_width = cols * thumb_size + (cols + 1) * pad
+    canvas_height = rows * thumb_size + (rows + 1) * pad + title_pad
     canvas = Image.new("RGB", (canvas_width, canvas_height), "white")
     draw = ImageDraw.Draw(canvas)
     
     # Draw title
     try:
-        font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 24)
+        font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 42)
     except:
         font = ImageFont.load_default()
     
     title = f"{category} ({n} images)"
-    draw.text((10, 10), title, fill="black", font=font)
+    draw.text((pad, 10), title, fill="black", font=font)
     
     # Place thumbnails
     for idx, img_path in enumerate(images):
@@ -331,14 +333,14 @@ def create_grid_visualization(images: List[str], category: str, output_path: str
             
             row = idx // cols
             col = idx % cols
-            x = col * thumb_size + (col + 1) * 10
-            y = row * thumb_size + (row + 1) * 10 + 50
+            x = col * thumb_size + (col + 1) * pad
+            y = row * thumb_size + (row + 1) * pad + title_pad
             
             canvas.paste(img, (x, y))
         except Exception as e:
             print(f"    Error loading {img_path}: {e}")
     
-    canvas.save(output_path)
+    canvas.save(output_path, quality=95)
     print(f"  ✓ Saved visualization: {output_path}")
 
 
@@ -549,7 +551,7 @@ def arrays_to_pickle_for_keys(
 
 if __name__ == '__main__':
     # Defaults
-    default_panel = '24-P10-A'
+    default_panel = '23-P09-D'
 
     # Parse args with simple flag handling
     argv = sys.argv[1:]
@@ -578,14 +580,14 @@ if __name__ == '__main__':
         panel = default_panel
     
     # Infer paths from panel name
-    el_dir = Path(f'data/EAGLE/{panel}/EL')
-    vi_dir = Path(f'data/EAGLE/{panel}/VI')
-    arrays_out = Path(f'data/EAGLE/{panel}')
-    arrays_pkl_out = Path(f'data/EAGLE/{panel}/dataset_arrays_{panel}.pkl')
+    el_dir = Path(f'/Users/eagle/Documents/eagle-classification/normalized_images/{panel}/EL')
+    vi_dir = Path(f'/Users/eagle/Documents/eagle-classification/normalized_images/{panel}/VI')
+    arrays_out = Path(f'/Users/eagle/Documents/eagle-classification/OPENAI/{panel}')
+    arrays_pkl_out = Path(f'/Users/eagle/Documents/eagle-classification/OPENAI/{panel}/dataset_arrays_{panel}.pkl')
     
-    el_csv = f'data/EAGLE/{panel}/classification_results_EL_{panel}_integer.csv'
-    vi_csv = f'data/EAGLE/{panel}/classification_results_VI_{panel}_integer.csv'
-    out_csv = f'data/EAGLE/{panel}/classification_results_EL_VI_{panel}_simple.csv'
+    el_csv = f'/Users/eagle/Documents/eagle-classification/OPENAI/{panel}/classification_results_EL_{panel}_integer.csv'
+    vi_csv = f'/Users/eagle/Documents/eagle-classification/OPENAI/{panel}/classification_results_VI_{panel}_integer.csv'
+    out_csv = f'/Users/eagle/Documents/eagle-classification/OPENAI/{panel}/classification_results_EL_VI_{panel}_simple.csv'
 
     try:
         # Build keys from CSVs first (union)

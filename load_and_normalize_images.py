@@ -11,9 +11,13 @@ import re
 
 
 # Configuration for both folders
+#groups = ['D1', 'D2', 'D3', 'D4', 'D5']
+#groups = [#'A1', 'A2', 'A3', 'A4', 'A5', 'A6']
+groups = ['A1', 'A2']
 IMAGE_FOLDERS = [
  #   {"path": "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage/bboxes/23-P09-D/", "groups": ['D1', 'D2', 'D3', 'D4', 'D5']},
-    {"path": "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage/bboxes/24-P10-A/", "groups": ['A1', 'A2', 'A3', 'A4', 'A5', 'A6']}
+  #  {"path": "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage/bboxes/24-P10-A/", "groups": ['A1', 'A2', 'A3', 'A4', 'A5', 'A6']}
+    {"path": "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage/bboxes/25-019-A/", "groups": groups}
 ]
 BANDS = ['EL', 'UV', 'VI']
 
@@ -30,11 +34,14 @@ def load_images_by_group_and_band(folder_path):
         raise FileNotFoundError(f"Folder not found: {folder_path}")
     # Determine group prefix and group list
     if "23-P09-D" in str(folder_path):
-        groups = ['D1', 'D2', 'D3', 'D4', 'D5']
+        flag = 'D'
         pattern = re.compile(r'23-P09-D(\d)_(EL|UV|VI)_Cell\d+', re.IGNORECASE)
     elif "24-P10-A" in str(folder_path):
-        groups = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6']
-        pattern = re.compile(r'24-P10-A(A\d)_(EL|UV|VI)_Cell\d+', re.IGNORECASE)
+        flag = 'A'
+        pattern = re.compile(r'24-P10_A(\d)_(EL|UV|VI)_Cell\d+', re.IGNORECASE)
+    elif "25-019-A" in str(folder_path):
+        flag = 'A'
+        pattern = re.compile(r'25-019_A(\d)_(EL|UV|VI)_Cell\d+', re.IGNORECASE)
     else:
         raise ValueError(f"Unknown folder structure: {folder_path}")
     images = {group: {band: [] for band in BANDS} for group in groups}
@@ -47,7 +54,7 @@ def load_images_by_group_and_band(folder_path):
             if img_file.is_file() and img_file.suffix.lower() in ['.png', '.jpg', '.jpeg', '.tif', '.tiff']:
                 match = pattern.search(img_file.stem)
                 if match:
-                    group = f'D{match.group(1)}'
+                    group = f'{flag}{match.group(1)}'
                     band = match.group(2).upper()
                     if group in images and band in BANDS:
                         img = Image.open(img_file)
@@ -308,7 +315,7 @@ def main():
                 specific_images_sorted = sorted(specific_images, key=lambda x: extract_cell_number(x[0]))
                 n_images = len(specific_images_sorted)
                 n_rows, n_cols = 5, 8
-                fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols * 1, n_rows * 1))
+                fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols * 2.5, n_rows * 2.5))
                 for idx, (fname, norm_img, orig_img) in enumerate(specific_images_sorted):
                     if idx >= n_rows * n_cols:
                         break
@@ -327,7 +334,7 @@ def main():
                     col = idx % n_cols
                     axes[row, col].axis('off')
                 plt.tight_layout()
-                plt.savefig(grid_dir / f'{group}_{band}_grid.jpg', dpi=72, bbox_inches='tight')
+                plt.savefig(grid_dir / f'{group}_{band}_grid.jpg', dpi=200, bbox_inches='tight')
                 plt.close(fig)
                 print(f'Saved: {grid_dir}/{group}_{band}_grid.jpg')
 if __name__ == '__main__':

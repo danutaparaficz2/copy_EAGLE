@@ -1,18 +1,22 @@
 import os
 import base64
+from dotenv import load_dotenv
 import mimetypes
 import csv
 from pathlib import Path
 from openai import OpenAI
-
+from PIL import Image
+import io
+# Option 2: Load .env from a specific path
+load_dotenv('/Users/eagle/Documents/.env')
 # Directory containing images to classify
-panel=os.getenv('PANEL', '24-P10-A')
-IMAGE_DIR = (f"data/EAGLE/{panel}/EL/")
+panel=os.getenv('PANEL', '23-P09-D')
+IMAGE_DIR = (f"/Users/eagle/Documents/eagle-classification/normalized_images/{panel}/EL/")
 # Output CSV file
-OUTPUT_CSV = (f"data/EAGLE/{panel}/classification_results_EL_{panel}.csv")
-OUTPUT_INTEGER_CSV = (f"data/EAGLE/{panel}/classification_results_EL_{panel}_integer.csv")
-API_KEY = os.getenv("DASHSCOPE_API_KEY")
-BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+OUTPUT_CSV = (f"/Users/eagle/Documents/eagle-classification/OPENAI/{panel}/classification_results_EL_{panel}.csv")
+OUTPUT_INTEGER_CSV = (f"/Users/eagle/Documents/eagle-classification/OPENAI/{panel}/classification_results_EL_{panel}_integer.csv")
+API_KEY = os.getenv("OPENAI_API_KEY")
+BASE_URL = "https://api.openai.com/v1"
 
 import csv
 import re
@@ -110,12 +114,23 @@ def convert_csv(input_file, output_file):
 def encode_file_to_data_uri(path: str) -> str:
     if not os.path.exists(path):
         raise FileNotFoundError(f"Image file not found: {path}")
-    mime, _ = mimetypes.guess_type(path)
-    if not mime or not mime.startswith("image/"):
-        mime = "image/jpeg"
-    with open(path, "rb") as f:
-        b64 = base64.b64encode(f.read()).decode("utf-8")
-    return f"data:{mime};base64,{b64}"
+    
+    # Open image with PIL
+    img = Image.open(path)
+    
+    # Convert to RGB if needed (handles RGBA, L, etc.)
+    if img.mode not in ('RGB', 'L'):
+        img = img.convert('RGB')
+    
+    # Convert to PNG format in memory
+    buffer = io.BytesIO()
+    img.save(buffer, format='PNG')
+    buffer.seek(0)
+    
+    # Encode to base64
+    b64 = base64.b64encode(buffer.read()).decode("utf-8")
+    
+    return f"data:image/png;base64,{b64}"
 
 def classify_image(client: OpenAI, image_path: str) -> str:
     """Classify a single image and return the assessment text."""
@@ -124,16 +139,46 @@ def classify_image(client: OpenAI, image_path: str) -> str:
     except Exception as e:
         return f"ERROR: {e}"
 
-    prompt_text = (
-        "Analyze the solar cell image to determine whether it appears good or damaged. "
-        "If damaged, classify defects: Crack (fracture lines), Cross (very short gridline/busbar cross), "
-        "Dark (clearly darker and not small regions), Corrosion (oxidation/discoloration). "
-        "Return a concise assessment. Multiple defect types are possible."
-        " Photo for each cell was made with very good light distribution. ")
+    prompt_text = """
+    Analyze the solar cell EL image.
+
+    Only report defects that are clearly visible and unambiguous.
+
+    Do NOT classify the following as defects:
+    - normal vertical EL stripe patterns
+    - uniform intensity variations
+    - faint texture lines aligned with cell structure
+    - busbar shadows
+    - imaging noise
+
+    Defect definitions:
+    Crack: a clearly visible, continuous, irregular fracture line not aligned with gridlines.
+    Cross: a broken gridline or busbar segment forming a short cross-like interruption.
+    Dark: a large, clearly darker region significantly darker than surroundings.
+    Corrosion: visible oxidation or discoloration near busbars or fingers.
+
+    Return only:
+    - good
+    - Crack
+    - Cross
+    - Dark
+    - Corrosion
+
+    If no clear defect is present, return: good.
+    """
+
     try:
         completion = client.chat.completions.create(
-            model="qwen3-vl-plus",
+            model="gpt-4o",
+            temperature=0,
+            top_p=1,
             messages=[
+                {
+                    "role": "system",
+                    "content": "You are a strict industrial solar cell EL defect inspector. "
+                            "Be conservative. Only report defects that are clearly visible and unambiguous. "
+                            "If uncertain, return 'good'."
+                },
                 {
                     "role": "user",
                     "content": [
@@ -143,6 +188,7 @@ def classify_image(client: OpenAI, image_path: str) -> str:
                 },
             ],
         )
+
 
         content = completion.choices[0].message.content
         if isinstance(content, list):
@@ -155,7 +201,7 @@ def classify_image(client: OpenAI, image_path: str) -> str:
 
 def main():
     if not API_KEY:
-        print("Missing DASHSCOPE_API_KEY environment variable.")
+        print("Missing API_KEY environment variable.")
         return
 
     image_dir = Path(IMAGE_DIR)
