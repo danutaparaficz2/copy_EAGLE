@@ -504,3 +504,34 @@ def confusion_matrix_per_class(pred_labels, true_labels, plot=False, normalize=F
 #             web_index += batch_size
 
 #     return combined_data
+
+
+def display_image(image_path, output_path=None):
+    """
+    Display a single image from disk.
+    
+    Args:
+        image_path (str): Path to the image file (.tif, .png, .jpg, etc.)
+    """
+    if not os.path.exists(image_path):
+        print(f"Error: Image file not found at {image_path}")
+        return
+    
+    img = Image.open(image_path)
+    
+    # Convert to array for matplotlib
+    img_array = np.array(img)
+    
+    # Display
+    fig, ax = plt.subplots(figsize=(10, 10))
+    if img_array.ndim == 2:
+        ax.imshow(img_array, cmap='gray')
+    else:
+        ax.imshow(img_array)
+    ax.set_title(os.path.basename(image_path))
+    ax.axis('off')
+    plt.tight_layout()
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    print(f"Plot saved to: {output_path}")
+    plt.close()

@@ -11,18 +11,18 @@ import re
 
 
 # Configuration for both folders
-#groups = ['D1', 'D2', 'D3', 'D4', 'D5']
-#groups = [#'A1', 'A2', 'A3', 'A4', 'A5', 'A6']
-groups = ['A1', 'A2']
+
 IMAGE_FOLDERS = [
- #   {"path": "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage/bboxes/23-P09-D/", "groups": ['D1', 'D2', 'D3', 'D4', 'D5']},
-  #  {"path": "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage/bboxes/24-P10-A/", "groups": ['A1', 'A2', 'A3', 'A4', 'A5', 'A6']}
-    {"path": "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage/bboxes/25-019-A/", "groups": groups}
+    #{"path": "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage/bboxes/23-P09-D/", "groups": ['D1', 'D2', 'D3', 'D4', 'D5']},
+    #{"path": "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage/bboxes/24-P10-A/", "groups": ['A1', 'A2', 'A3', 'A4', 'A5', 'A6']},
+    #{"path": "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage/bboxes/25-019-A/", "groups": ['A1', 'A2']}
+    {"path": "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage/bboxes/23-P09-B/", "groups": ['B1', 'B2', 'B3', 'B4','B5']}
+
 ]
 BANDS = ['EL', 'UV', 'VI']
 
 
-def load_images_by_group_and_band(folder_path):
+def load_images_by_group_and_band(folder_path, groups):
     """
     Load images organized by group and band.
     Returns: dict[group][band] = list of (filename, image_array)
@@ -36,6 +36,9 @@ def load_images_by_group_and_band(folder_path):
     if "23-P09-D" in str(folder_path):
         flag = 'D'
         pattern = re.compile(r'23-P09-D(\d)_(EL|UV|VI)_Cell\d+', re.IGNORECASE)
+    elif "23-P09-B" in str(folder_path):
+        flag = 'B'
+        pattern = re.compile(r'23-P09-B(\d)_(EL|UV|VI)_Cell\d+', re.IGNORECASE)
     elif "24-P10-A" in str(folder_path):
         flag = 'A'
         pattern = re.compile(r'24-P10_A(\d)_(EL|UV|VI)_Cell\d+', re.IGNORECASE)
@@ -68,6 +71,46 @@ def load_images_by_group_and_band(folder_path):
     for f in matched_files:
         print(f)
     return images
+
+
+def plot_original_brightest_el(images, output_file='el_brightest_darkest_original.png'):
+    print("\nBrightest and darkest ORIGINAL EL images per group:")
+    import matplotlib.pyplot as plt
+    n_groups = len(images.keys())
+    fig, axes = plt.subplots(n_groups, 2, figsize=(8, n_groups * 3))
+    fig.suptitle('Original EL Images: Brightest (left) vs Darkest (right)', fontsize=14)
+    for i, group in enumerate(images.keys()):
+        el_images = images[group]['EL']
+        if el_images:
+            # Find brightest and darkest by mean pixel value
+            means = [img.max() for _, img in el_images]
+            brightest_idx = int(np.argmax(means))
+            darkest_idx = int(np.argmin(means))
+            bright_name, bright_img = el_images[brightest_idx]
+            dark_name, dark_img = el_images[darkest_idx]
+            # Brightest
+            ax_bright = axes[i,0] if n_groups > 1 else axes[0]
+            ax_bright.imshow(bright_img.astype(np.uint8), cmap='gray', vmin=0, vmax=255)
+            ax_bright.set_title(f'{group} EL Brightest (Original)\n{bright_name}\nmean={bright_img.mean():.1f}', fontsize=9)
+            ax_bright.axis('off')
+            # Darkest
+            ax_dark = axes[i,1] if n_groups > 1 else axes[1]
+            ax_dark.imshow(dark_img.astype(np.uint8), cmap='gray', vmin=0, vmax=255)
+            ax_dark.set_title(f'{group} EL Darkest (Original)\n{dark_name}\nmean={dark_img.mean():.1f}', fontsize=9)
+            ax_dark.axis('off')
+        else:
+            # No EL images
+            ax_bright = axes[i,0] if n_groups > 1 else axes[0]
+            ax_dark = axes[i,1] if n_groups > 1 else axes[1]
+            ax_bright.text(0.5, 0.5, f'{group} EL\nNo image', ha='center', va='center', fontsize=12)
+            ax_dark.text(0.5, 0.5, f'{group} EL\nNo image', ha='center', va='center', fontsize=12)
+            ax_bright.axis('off')
+            ax_dark.axis('off')
+    plt.tight_layout()
+    # Remove saving and printing here; handled in main()
+    plt.savefig(output_file, dpi=150, bbox_inches='tight')
+    plt.close()
+ 
 
 
 def normalize_images(images):
@@ -130,7 +173,9 @@ def display_comparison(normalized_images, output_file='normalization_comparison.
                     filename, norm_img, orig_img = normalized_images[group][band][0]
                     # Before normalization
                     ax_before = axes[i, j * 2] if n_groups > 1 else axes[j * 2]
-                    im_before = ax_before.imshow(orig_img, cmap='gray')
+                    #im_before = ax_before.imshow(orig_img, cmap='gray')
+                    orig_uint8 = orig_img.astype(np.uint8)
+                    im_before = ax_before.imshow(orig_uint8, cmap='gray', vmin=0, vmax=255)
                     ax_before.set_title(f'{group}-{band}\nBefore\n{filename}', fontsize=10)
                     ax_before.axis('off')
                     plt.colorbar(im_before, ax=ax_before, fraction=0.046, pad=0.04)
@@ -154,6 +199,7 @@ def display_comparison(normalized_images, output_file='normalization_comparison.
     
     plt.tight_layout()
     plt.savefig(output_file, dpi=150, bbox_inches='tight')
+    plt.close()
     print(f"\nComparison plot saved to: {output_file}")
     # plt.show() removed for faster execution
 
@@ -163,12 +209,16 @@ def save_normalized_images(normalized_images, output_folder='normalized_images')
     Save normalized images to output folder.
     """
     output_path = Path(output_folder)
-    output_path.mkdir(exist_ok=True)
-    
+    if not output_path.exists():
+        output_path.mkdir()
+
     for group in normalized_images.keys():
         for band in BANDS:
             for filename, norm_img, _ in normalized_images[group][band]:
-                output_file = output_path / f"{Path(filename).stem}_normalized{Path(filename).suffix}"
+                out_folder = output_path / band 
+                if not out_folder.exists():
+                    out_folder.mkdir()
+                output_file =  out_folder / f"{Path(filename).stem}_normalized{Path(filename).suffix}"
                 if band == 'EL':
                     # Ensure EL image is 2D before saving as grayscale
                     norm_img_uint8 = norm_img.astype(np.uint8)
@@ -181,75 +231,35 @@ def save_normalized_images(normalized_images, output_folder='normalized_images')
                 print(f"Saved: {output_file}")
 
 
-def plot_normalized_brightest_el(normalized_images):
-
-            # Show brightest and darkest EL image from each group after normalization
-            print("\nBrightest and darkest EL images per group (after normalization):")
-            import matplotlib.pyplot as plt
-            n_groups = len(normalized_images.keys())
-            fig, axes = plt.subplots(n_groups, 2, figsize=(8, n_groups * 3))
-            for i, group in enumerate(normalized_images.keys()):
-                el_images = normalized_images[group]['EL']
-                if el_images:
-                    # Find brightest and darkest by mean pixel value
-                    means = [img.mean() for _, img, _ in el_images]
-                    brightest_idx = int(np.argmax(means))
-                    darkest_idx = int(np.argmin(means))
-                    bright_name, bright_img, _ = el_images[brightest_idx]
-                    dark_name, dark_img, _ = el_images[darkest_idx]
-                    # Print min/max for D5 EL
-                    min_val = bright_img.min()
-                    max_val = bright_img.max()
-                    print(f"D5 EL normalized brightest image: {bright_name}")
-                    print(f"normalized min: {min_val:.2f}, max: {max_val:.2f}, mean: {bright_img.mean():.2f}")
-                    # Brightest
-                    ax_bright = axes[i,0] if n_groups > 1 else axes[0]
-                    ax_bright.imshow(bright_img, cmap='gray', vmin=0, vmax=255)
-                    ax_bright.set_title(f'{group} EL Brightest\n{bright_name}', fontsize=10)
-                    ax_bright.axis('off')
-                    # Darkest
-                    ax_dark = axes[i,1] if n_groups > 1 else axes[1]
-                    ax_dark.imshow(dark_img, cmap='gray', vmin=0, vmax=255)
-                    ax_dark.set_title(f'{group} EL Darkest\n{dark_name}', fontsize=10)
-                    ax_dark.axis('off')
-                else:
-                    # No EL images
-                    ax_bright = axes[i,0] if n_groups > 1 else axes[0]
-                    ax_dark = axes[i,1] if n_groups > 1 else axes[1]
-                    ax_bright.text(0.5, 0.5, f'{group} EL\nNo image', ha='center', va='center', fontsize=12)
-                    ax_dark.text(0.5, 0.5, f'{group} EL\nNo image', ha='center', va='center', fontsize=12)
-                    ax_bright.axis('off')
-                    ax_dark.axis('off')
-            plt.tight_layout()
-            plt.savefig('el_brightest_darkest.png', dpi=150, bbox_inches='tight')
-            print("Saved: el_brightest_darkest.png")
-
-
-
-def plot_original_brightest_el(images):
-    print("\nBrightest and darkest ORIGINAL EL images per group:")
+def plot_normalized_brightest_el(normalized_images, output_file='el_brightest_darkest.png'):
+    # Show brightest and darkest EL image from each group after normalization
+    print("\nBrightest and darkest EL images per group (after normalization):")
     import matplotlib.pyplot as plt
-    n_groups = len(images.keys())
+    n_groups = len(normalized_images.keys())
     fig, axes = plt.subplots(n_groups, 2, figsize=(8, n_groups * 3))
-    fig.suptitle('Original EL Images: Brightest (left) vs Darkest (right)', fontsize=14)
-    for i, group in enumerate(images.keys()):
-        el_images = images[group]['EL']
+    for i, group in enumerate(normalized_images.keys()):
+        el_images = normalized_images[group]['EL']
         if el_images:
             # Find brightest and darkest by mean pixel value
-            means = [img.max() for _, img in el_images]
+            means = [img.mean() for _, img, _ in el_images]
             brightest_idx = int(np.argmax(means))
             darkest_idx = int(np.argmin(means))
-            bright_name, bright_img = el_images[brightest_idx]
-            dark_name, dark_img = el_images[darkest_idx]
+            bright_name, bright_img, _ = el_images[brightest_idx]
+            dark_name, dark_img, _ = el_images[darkest_idx]
+            # Print min/max for D5 EL
+            min_val = bright_img.min()
+            max_val = bright_img.max()
+            print(f"D5 EL normalized brightest image: {bright_name}")
+            print(f"normalized min: {min_val:.2f}, max: {max_val:.2f}, mean: {bright_img.mean():.2f}")
             # Brightest
             ax_bright = axes[i,0] if n_groups > 1 else axes[0]
-            ax_bright.imshow(bright_img.astype(np.uint8), cmap='gray', vmin=0, vmax=255)
-            ax_bright.set_title(f'{group} EL Brightest (Original)\n{bright_name}\nmean={bright_img.mean():.1f}', fontsize=9)
+            ax_bright.imshow(bright_img, cmap='gray', vmin=0, vmax=255)
+            ax_bright.set_title(f'{group} EL Brightest\n{bright_name}', fontsize=10)
             ax_bright.axis('off')
             # Darkest
             ax_dark = axes[i,1] if n_groups > 1 else axes[1]
-            ax_dark.imshow(dark_img.astype(np.uint8), cmap='gray', vmin=0, vmax=255)
-            ax_dark.set_title(f'{group} EL Darkest (Original)\n{dark_name}\nmean={dark_img.mean():.1f}', fontsize=9)
+            ax_dark.imshow(dark_img, cmap='gray', vmin=0, vmax=255)
+            ax_dark.set_title(f'{group} EL Darkest\n{dark_name}', fontsize=10)
             ax_dark.axis('off')
         else:
             # No EL images
@@ -260,11 +270,12 @@ def plot_original_brightest_el(images):
             ax_bright.axis('off')
             ax_dark.axis('off')
     plt.tight_layout()
-    # Remove saving and printing here; handled in main()
+    plt.savefig(output_file, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Saved: {output_file}")
+
     
 def main():
-
-
     for folder_cfg in IMAGE_FOLDERS:
         image_folder = folder_cfg["path"]
         folder_name = Path(image_folder.rstrip('/')).name
@@ -274,15 +285,12 @@ def main():
         norm_dir = Path("normalized_images") / folder_name
         norm_dir.mkdir(parents=True, exist_ok=True)
         print(f"\n[1/4] Loading images from {image_folder} ...")
-        images = load_images_by_group_and_band(image_folder)
+        images = load_images_by_group_and_band(image_folder, folder_cfg["groups"])
         # Count loaded images
         total = sum(len(images[g][b]) for g in images.keys() for b in BANDS)
         print(f"\nTotal images loaded: {total}")
         # Save original brightest/darkest plot
-        plt.figure()
-        plot_original_brightest_el(images)
-        plt.savefig(grid_dir / 'el_brightest_darkest_original.png', dpi=150, bbox_inches='tight')
-        plt.close()
+        plot_original_brightest_el(images, grid_dir / 'el_brightest_darkest_original.png')
         # Normalize images
         print("\n[2/4] Normalizing images by group and band...")
         normalized_images = normalize_images(images)
@@ -291,14 +299,8 @@ def main():
         print("="*80)
         # Display comparison
         print("\n[3/4] Creating visualization...")
-        plt.figure()
-        display_comparison(normalized_images)
-        plt.savefig(grid_dir / 'normalization_comparison.png', dpi=150, bbox_inches='tight')
-        plt.close()
-        plt.figure()
-        plot_normalized_brightest_el(normalized_images)
-        plt.savefig(grid_dir / 'el_brightest_darkest.png', dpi=150, bbox_inches='tight')
-        plt.close()
+        display_comparison(normalized_images, grid_dir / 'normalization_comparison.png')
+        plot_normalized_brightest_el(normalized_images, grid_dir / 'el_brightest_darkest.png')
         # Save normalized images
         print("\n[4/4] Saving normalized images...")
         save_normalized_images(normalized_images, output_folder=norm_dir)
@@ -337,5 +339,7 @@ def main():
                 plt.savefig(grid_dir / f'{group}_{band}_grid.jpg', dpi=200, bbox_inches='tight')
                 plt.close(fig)
                 print(f'Saved: {grid_dir}/{group}_{band}_grid.jpg')
+
+
 if __name__ == '__main__':
     main()

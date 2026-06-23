@@ -16,7 +16,7 @@ import io
 # Option 2: Load .env from a specific path
 load_dotenv('/Users/eagle/Documents/.env')
 # Directory containing images to classify
-panel=os.getenv('PANEL', '23-P09-D')
+panel=os.getenv('PANEL', '24-P10-A')
 IMAGE_DIR = (f"/Users/eagle/Documents/eagle-classification/normalized_images/{panel}/VI/")
 # Output CSV file
 OUTPUT_CSV = (f"/Users/eagle/Documents/eagle-classification/OPENAI/{panel}/classification_results_VI_{panel}.csv")
@@ -136,8 +136,9 @@ def encode_file_to_data_uri(path: str) -> str:
     
     # Encode to base64
     b64 = base64.b64encode(buffer.read()).decode("utf-8")
-    
+       
     return f"data:image/png;base64,{b64}"
+
 
 def classify_image(client: OpenAI, image_path: str) -> str:
     """Classify a single image and return the assessment text."""
@@ -153,42 +154,66 @@ def classify_image(client: OpenAI, image_path: str) -> str:
     #     "Return a concise assessment. Multiple defect types are possible."
     #     " Photo for each cell was made with very good light distribution. ")
     
+    # prompt_text = """
+    # Analyze the provided solar cell visible-light image.
+
+    # INSPECTION RULES (strict):
+
+    # 1. Only classify a defect if it is clearly visible and structurally significant.
+    # 2. Ignore:
+    # - minor lighting reflections
+    # - small dust particles
+    # - uniform shading variations
+    # - camera noise
+    # - minor surface texture variations
+
+    # DEFECT DEFINITIONS:
+
+    # 5 – Discoloration:
+    # - A clear and continuous color change
+    # - Located along busbars or gridlines
+    # - Structurally different from surrounding material
+    # - Not caused by lighting reflection
+
+    # 6 – Delamination:
+    # - Visible separation or lifting of layers
+    # - Bubbling, peeling, or detachment
+    # - Clear structural surface disruption
+
+    # DECISION POLICY:
+    # If the feature could reasonably be caused by lighting, reflection, or minor surface variation, classify as 0.
+
+    # OUTPUT FORMAT:
+    # Return only numbers separated by comma if multiple defects are clearly visible:
+    # - 0 (good)
+    # - 5
+    # - 6
+
+    # If no clear defect is present, return: 0
+    # """
+
+
     prompt_text = """
-    Analyze the provided solar cell visible-light image.
+    Analyze the provided visible-light (VI) image of a solar cell for material degradation.
 
-    INSPECTION RULES (strict):
+    ### TARGET DEFECTS:
 
-    1. Only classify a defect if it is clearly visible and structurally significant.
-    2. Ignore:
-    - minor lighting reflections
-    - small dust particles
-    - uniform shading variations
-    - camera noise
-    - minor surface texture variations
+    1. **Discoloration & Snail Trails (Code 5):** - Look for "Snail Trails": thin, dark, jagged, or "worm-like" lines that often follow the vertical grid fingers or cross the cell.
+    - Look for "Browning/Yellowing/Reddening/Oxidation": localized dark or hazy patches that look "burnt" or "stained" compared to the uniform dark blue/black of a healthy cell.
+    - **Critical:** Even if the color shift is gray/dark rather than brown, if it forms an irregular "path" or "stain," classify it as 5.
 
-    DEFECT DEFINITIONS:
+    2. **Delamination (Code 6):** - Look for "peeling" textures or silvery, mirror-like white void spaces.
+    - Look for a "cloudy" or "frosted" appearance that looks like moisture or air is trapped between the glass and the cell.
 
-    5 – Discoloration:
-    - A clear and continuous color change
-    - Located along busbars or gridlines
-    - Structurally different from surrounding material
-    - Not caused by lighting reflection
+    ### INSPECTION LOGIC:
+    - Discoloration in VI images is often subtle. If the cell surface has non-uniform "shadows" or jagged lines, classify as 5.
+    - Healthy cells should look completely uniform in texture and tone across the entire square.
 
-    6 – Delamination:
-    - Visible separation or lifting of layers
-    - Bubbling, peeling, or detachment
-    - Clear structural surface disruption
-
-    DECISION POLICY:
-    If the feature could reasonably be caused by lighting, reflection, or minor surface variation, classify as 0.
-
-    OUTPUT FORMAT:
-    Return only numbers separated by comma if multiple defects are clearly visible:
-    - 0 (good)
-    - 5
-    - 6
-
-    If no clear defect is present, return: 0
+    ### OUTPUT FORMAT:
+    Return only the numbers (comma-separated) or 0:
+    - 0 (Good)
+    - 5 (Discoloration/Snail Trails)
+    - 6 (Delamination)
     """
     try:
 
@@ -200,8 +225,7 @@ def classify_image(client: OpenAI, image_path: str) -> str:
                 {
                     "role": "system",
                     "content":     "You are an industrial solar cell inspector analyzing visible light images. "
-                                    "Be conservative and precise. Only report defects that are clearly visible "
-                                    "and structurally significant. If uncertain, classify as 0."
+  
                 },
                 {
                     "role": "user",
