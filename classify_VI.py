@@ -1,29 +1,29 @@
+import argparse
 import os
 import base64
-import mimetypes
 import csv
+import sys
+import time
 from pathlib import Path
 from openai import OpenAI
-import os
-import base64
 from dotenv import load_dotenv
-import mimetypes
-import csv
-from pathlib import Path
-from openai import OpenAI
 from PIL import Image
 import io
-# Option 2: Load .env from a specific path
-load_dotenv('/Users/eagle/Documents/.env')
-# Directory containing images to classify
-panel=os.getenv('PANEL', '24-P10-A')
-IMAGE_DIR = (f"/Users/eagle/Documents/eagle-classification/normalized_images/{panel}/VI/")
-# Output CSV file
-OUTPUT_CSV = (f"/Users/eagle/Documents/eagle-classification/OPENAI/{panel}/classification_results_VI_{panel}.csv")
-OUTPUT_INTEGER_CSV = (f"/Users/eagle/Documents/eagle-classification/OPENAI/{panel}/classification_results_VI_{panel}_integer.csv")
-API_KEY = os.getenv("OPENAI_API_KEY")
-BASE_URL = "https://api.openai.com/v1"
 
+print("[MODULE] Starting imports...", file=sys.stderr, flush=True)
+
+# Load .env from a specific path
+print("[MODULE] Loading .env...", file=sys.stderr, flush=True)
+load_dotenv('myenv/.env')
+print("[MODULE] .env loaded", file=sys.stderr, flush=True)
+
+#API_KEY = os.getenv("OPENAI_API_KEY")
+API_KEY = "token-not-needed"
+print(f"[MODULE] API_KEY loaded: {bool(API_KEY)}", file=sys.stderr, flush=True)
+
+#BASE_URL = "https://api.openai.com/v1"
+BASE_URL = os.getenv("OPENAI_BASE_URL", "http://localhost:8000/v1")
+print(f"[MODULE] BASE_URL: {BASE_URL}", file=sys.stderr, flush=True)
 
 import csv
 import re
@@ -39,6 +39,7 @@ LABEL_MAP = {
     'discoloration': 5,
     'delamination': 6
 }
+INT_TO_LABEL = {v: k for k, v in LABEL_MAP.items()}
 
 
 def parse_classification(text):
@@ -67,6 +68,41 @@ def parse_classification(text):
     found_labels = sorted(set(found_labels))
     
     return found_labels
+
+
+def convert_integer_csv_to_labels(input_file, output_file):
+    """
+    Convert integer-coded classification CSV back to string labels.
+    E.g. '5 6' -> 'discoloration delamination', '0' -> 'good'
+    """
+    input_path = Path(input_file)
+    output_path = Path(output_file)
+    if not input_path.exists():
+        raise FileNotFoundError(f"Input file not found: {input_file}")
+    processed_rows = []
+    with open(input_path, 'r', encoding='utf-8') as infile:
+        reader = csv.reader(infile)
+        header = next(reader)
+        for row in reader:
+            if len(row) < 2:
+                continue
+            filename = row[0]
+            codes_str = row[1].strip()
+            labels = []
+            for token in codes_str.split():
+                try:
+                    code = int(token)
+                    labels.append(INT_TO_LABEL.get(code, str(code)))
+                except ValueError:
+                    labels.append(token)
+            processed_rows.append((filename, ' '.join(labels) if labels else 'good'))
+    processed_rows.sort(key=lambda r: r[0].lower())
+    with open(output_path, 'w', encoding='utf-8', newline='') as outfile:
+        writer = csv.writer(outfile)
+        writer.writerow(header)
+        for filename, label_str in processed_rows:
+            writer.writerow([filename, label_str])
+    print(f"\u2713 Converted integer CSV to labels: {output_file}")
 
 
 def convert_csv(input_file, output_file):
@@ -143,7 +179,10 @@ def encode_file_to_data_uri(path: str) -> str:
 def classify_image(client: OpenAI, image_path: str) -> str:
     """Classify a single image and return the assessment text."""
     try:
+        print("  [encoding image]", end="", flush=True)
+        start = time.time()
         data_uri = encode_file_to_data_uri(image_path)
+        print(f" ✓ ({time.time()-start:.1f}s)", end="", flush=True)
     except Exception as e:
         return f"ERROR: {e}"
 
@@ -194,33 +233,51 @@ def classify_image(client: OpenAI, image_path: str) -> str:
 
 
     prompt_text = """
-    Analyze the provided visible-light (VI) image of a solar cell for material degradation.
+    Analyze the provided solar cell visible-light image.
 
-    ### TARGET DEFECTS:
+    INSPECTION RULES (strict):
 
-    1. **Discoloration & Snail Trails (Code 5):** - Look for "Snail Trails": thin, dark, jagged, or "worm-like" lines that often follow the vertical grid fingers or cross the cell.
-    - Look for "Browning/Yellowing/Reddening/Oxidation": localized dark or hazy patches that look "burnt" or "stained" compared to the uniform dark blue/black of a healthy cell.
-    - **Critical:** Even if the color shift is gray/dark rather than brown, if it forms an irregular "path" or "stain," classify it as 5.
+    1. Only classify a defect if it is clearly visible and structurally significant.
+    2. Ignore:
+    - minor lighting reflections
+    - small dust particles
+    - uniform shading variations
+    - camera noise
+    - minor surface texture variations
 
-    2. **Delamination (Code 6):** - Look for "peeling" textures or silvery, mirror-like white void spaces.
-    - Look for a "cloudy" or "frosted" appearance that looks like moisture or air is trapped between the glass and the cell.
+    DEFECT DEFINITIONS:
 
-    ### INSPECTION LOGIC:
-    - Discoloration in VI images is often subtle. If the cell surface has non-uniform "shadows" or jagged lines, classify as 5.
-    - Healthy cells should look completely uniform in texture and tone across the entire square.
+    5 – Discoloration:
+    - A clear and continuous color change
+    - Located along busbars or gridlines
+    - Structurally different from surrounding material
+    - Not caused by lighting reflection
 
-    ### OUTPUT FORMAT:
-    Return only the numbers (comma-separated) or 0:
-    - 0 (Good)
-    - 5 (Discoloration/Snail Trails)
+    6 – Delamination:
+    - Visible separation or lifting of layers
+    - Bubbling, peeling, or detachment
+    - Clear structural surface disruption
+
+    DECISION POLICY:
+    If the feature could reasonably be caused by lighting, reflection, or minor surface variation, classify as 0.
+
+    OUTPUT FORMAT:
+    Return only numbers separated by space if multiple defects are clearly visible:
+    - 0 (good)
+    - 5 (Discoloration)
     - 6 (Delamination)
+
+    If no clear defect is present, return: 0
     """
     try:
-
+        print(" [inferring]", end="", flush=True)
+        start = time.time()
         completion = client.chat.completions.create(
-            model="gpt-4o",
+          #  model="gpt-4o",
+            model="nvidia/Qwen2.5-VL-7B-Instruct-NVFP4",
             temperature=0,
             top_p=1,
+            timeout=300,
             messages=[
                 {
                     "role": "system",
@@ -237,25 +294,40 @@ def classify_image(client: OpenAI, image_path: str) -> str:
             ],
         )
         content = completion.choices[0].message.content
+        elapsed = time.time() - start
+        print(f" ✓ ({elapsed:.1f}s)", flush=True)
         if isinstance(content, list):
             texts = [c.get("text", "") for c in content if isinstance(c, dict)]
             return " ".join(t for t in texts if t.strip())
         else:
             return content or "No response"
     except Exception as e:
+        print(f" ✗ ERROR", flush=True)
         return f"API_ERROR: {e}"
 
 def main():
-    if not API_KEY:
-        print("Missing DASHSCOPE_API_KEY environment variable.")
-        return
+    print("[START] classify_VI.py starting up...", flush=True)
+    
+    parser = argparse.ArgumentParser(description="Classify VI solar cell images.")
+    parser.add_argument("--panel", default="23-P09-B",
+                        help="Panel identifier, e.g. 23-P09-B")
+    args = parser.parse_args()
+    print(f"[INFO] Using panel: {args.panel}", flush=True)
 
-    image_dir = Path(IMAGE_DIR)
+    panel = args.panel
+    image_dir_str = f"normalized_images/{panel}/VI/"
+    output_folder = os.path.join("OPENAI", panel)
+    output_integer_csv = os.path.join(output_folder, f"classification_results_VI_{panel}_integer.csv")
+    output_csv = os.path.join(output_folder, f"classification_results_VI_{panel}.csv")
+    os.makedirs(output_folder, exist_ok=True)
+
+    image_dir = Path(image_dir_str)
     if not image_dir.exists() or not image_dir.is_dir():
-        print(f"ERROR: Directory not found or not a directory: {IMAGE_DIR}")
+        print(f"ERROR: Directory not found or not a directory: {image_dir_str}")
         return
 
     # Collect all image files (common extensions)
+    print(f"[INFO] Scanning for images in: {image_dir_str}", flush=True)
     image_extensions = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".webp"}
     image_files = [
         f for f in image_dir.iterdir()
@@ -263,30 +335,35 @@ def main():
     ]
 
     if not image_files:
-        print(f"No images found in {IMAGE_DIR}")
+        print(f"No images found in {image_dir_str}")
         return
 
-    print(f"Found {len(image_files)} image(s) in {IMAGE_DIR}")
-    print(f"Results will be saved to {OUTPUT_INTEGER_CSV}")
+    print(f"Found {len(image_files)} image(s) in {image_dir_str}", flush=True)
+    print(f"Results will be saved to {output_integer_csv}", flush=True)
     sorted_image_files = sorted(image_files, key=lambda x: x.name)
 
-
+    print(f"[INFO] Initializing OpenAI client with BASE_URL: {BASE_URL}", flush=True)
     client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
+    print(f"[INFO] Client initialized successfully", flush=True)
 
     # Open CSV and write results
-    with open(OUTPUT_INTEGER_CSV, "w", newline="", encoding="utf-8") as csvfile:
+    with open(output_integer_csv, "w", newline="", encoding="utf-8") as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(["filename", "classification"])
 
         for i, image_path in enumerate(sorted_image_files, 1):
-            print(f"[{i}/{len(sorted_image_files)}] Classifying {image_path.name}...", end=" ")
+            print(f"[{i}/{len(sorted_image_files)}] {image_path.name}", end="")
+            sys.stdout.flush()
             result = classify_image(client, str(image_path))
-            print(f"Result: {result} for {image_path.name}")
+            print(f" → {result}")
+            sys.stdout.flush()
             writer.writerow([image_path.name, result])
-            print("Done.")
+            csvfile.flush()
 
-    print(f"\nClassification complete. Results saved to {OUTPUT_INTEGER_CSV}")
+    print(f"\nClassification complete. Results saved to {output_integer_csv}")
 
+    convert_integer_csv_to_labels(output_integer_csv, output_csv)
+    print(f"Label CSV saved to {output_csv}")
 
 
 if __name__ == "__main__":

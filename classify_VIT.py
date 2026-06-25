@@ -90,8 +90,9 @@ label_strings = [
 #predlabels_new = predictions_new.predictions.argmax(axis=-1)
 #predictions_new.metrics
 
-
-csv_path = f"OPENAI/{panel}/classification_results_VIT_{panel}.csv"
+output_dir = f"OPENAI/{panel}"
+os.makedirs(output_dir, exist_ok=True)
+csv_path = os.path.join(output_dir, f"classification_results_VIT_{panel}.csv")
 with open(csv_path, "w", newline="") as f:
     writer = csv.writer(f)
     writer.writerow(["filename", "classification"])

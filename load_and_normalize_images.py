@@ -8,21 +8,36 @@ import matplotlib.pyplot as plt
 from PIL import Image
 from pathlib import Path
 import re
-
+from tqdm import tqdm
 
 # Configuration for both folders
 
-IMAGE_FOLDERS = [
-    #{"path": "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage/bboxes/23-P09-D/", "groups": ['D1', 'D2', 'D3', 'D4', 'D5']},
-    #{"path": "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage/bboxes/24-P10-A/", "groups": ['A1', 'A2', 'A3', 'A4', 'A5', 'A6']},
-    #{"path": "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage/bboxes/25-019-A/", "groups": ['A1', 'A2']}
-    {"path": "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage/bboxes/23-P09-B/", "groups": ['B1', 'B2', 'B3', 'B4','B5']}
+import re
+import argparse
 
-]
 BANDS = ['EL', 'UV', 'VI']
 
+IMAGE_SUFFIXES = {'.png', '.jpg', '.jpeg', '.tif', '.tiff'}
 
-def load_images_by_group_and_band(folder_path, groups):
+def get_groups_from_filenames(fpath):
+    print(f"\nDetecting groups from filenames in: {fpath}")
+    panel = os.path.basename(fpath)
+    panel2 = panel[:-2] + '_' + panel[-1]
+    #print(f"Panel: {panel}")
+    groups = set()
+    files = [f for f in os.listdir(fpath) if f.endswith(".tif")]
+    for fname in files:
+        match = re.search(rf"{re.escape(panel)}(\d+)", fname)
+        match2 = re.search(rf"{re.escape(panel2)}(\d+)", fname)
+        if match:
+                no = match.group(1)
+        elif match2:
+                no = match2.group(1)
+        groups.add(f"{panel[-1]}{no}")
+    return sorted(list(groups))
+
+
+def load_images_by_group_and_band(folder_path, panel, groups):
     """
     Load images organized by group and band.
     Returns: dict[group][band] = list of (filename, image_array)
@@ -32,13 +47,12 @@ def load_images_by_group_and_band(folder_path, groups):
     folder = Path(folder_path)
     if not folder.exists():
         raise FileNotFoundError(f"Folder not found: {folder_path}")
+
     # Determine group prefix and group list
+    '''
     if "23-P09-D" in str(folder_path):
         flag = 'D'
         pattern = re.compile(r'23-P09-D(\d)_(EL|UV|VI)_Cell\d+', re.IGNORECASE)
-    elif "23-P09-B" in str(folder_path):
-        flag = 'B'
-        pattern = re.compile(r'23-P09-B(\d)_(EL|UV|VI)_Cell\d+', re.IGNORECASE)
     elif "24-P10-A" in str(folder_path):
         flag = 'A'
         pattern = re.compile(r'24-P10_A(\d)_(EL|UV|VI)_Cell\d+', re.IGNORECASE)
@@ -47,31 +61,83 @@ def load_images_by_group_and_band(folder_path, groups):
         pattern = re.compile(r'25-019_A(\d)_(EL|UV|VI)_Cell\d+', re.IGNORECASE)
     else:
         raise ValueError(f"Unknown folder structure: {folder_path}")
+    '''
+    flag = panel[-1]  # Extract 'B' from '23-P09-B'
+    panel2 = panel[:-2] + '_' + panel[-1]  # '24-128-A' -> '24-128_A'
+
+    pattern = re.compile(rf'{re.escape(panel)}(\d)_(EL|UV|VI)_Cell\d+', re.IGNORECASE)
+    pattern2 = re.compile(rf'{re.escape(panel2)}(\d)_(EL|UV|VI)_Cell\d+', re.IGNORECASE)
+    #print(f"Using regex pattern:  {pattern.pattern}")
+    #print(f"Using regex pattern2: {pattern2.pattern}")
     images = {group: {band: [] for band in BANDS} for group in groups}
 
-    from tqdm import tqdm
-    all_files = list(folder.glob('**/*'))
-    matched_files = []
+    
+    
+    all_files = [p for p in folder.rglob('*') if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES]
     with tqdm(total=len(all_files), desc="Loading images", unit="file") as pbar:
         for img_file in all_files:
-            if img_file.is_file() and img_file.suffix.lower() in ['.png', '.jpg', '.jpeg', '.tif', '.tiff']:
-                match = pattern.search(img_file.stem)
-                if match:
-                    group = f'{flag}{match.group(1)}'
-                    band = match.group(2).upper()
-                    if group in images and band in BANDS:
-                        img = Image.open(img_file)
-                        img_array = np.array(img, dtype=np.float32)
-                        print(img_array.min(), img_array.max(), img_file.name)
-
-                        images[group][band].append((img_file.name, img_array))
-                        matched_files.append(f"Loaded: {img_file.name} -> Group: {group}, Band: {band}")
+            match = pattern.search(img_file.stem) or pattern2.search(img_file.stem)
+            #print(f"Processing file: {img_file.name}, Match: {match.group(0) if match else 'No match'}")
+            if match:
+                group = f'{flag}{match.group(1)}'
+                band = match.group(2).upper()
+                print(f"Detected group: {group}, band: {band}")
+                if group in images and band in BANDS:
+                    for attempt in range(3):
+                        try:
+                            with Image.open(img_file) as img:
+                                img_array = np.array(img, dtype=np.float32)
+                                #print(f"Loaded image: {img_file.name}, shape: {img_array.shape}, dtype: {img_array.dtype}")
+                            images[group][band].append((img_file.name, img_array))
+                            break
+                        except (TimeoutError, OSError) as e:
+                            if attempt < 2:
+                                print(f"\nRetry {attempt+1}/3 for {img_file.name}: {e}")
+                            else:
+                                print(f"\nSkipping {img_file.name} after 3 failed attempts: {e}")
             pbar.update(1)
-    print("\nMatched files:")
-    for f in matched_files:
-        print(f)
     return images
 
+
+def compute_min_and_topk_percentile(image_arrays, k=100, percentile=30):
+    """
+    Compute global min and percentile over top-k brightest pixels across images
+    without concatenating all pixels into one huge array.
+    """
+    global_min = np.inf
+    topk = np.array([], dtype=np.float32)
+
+    for img in image_arrays:
+        flat = img.ravel()
+        if flat.size == 0:
+            continue
+
+        img_min = float(flat.min())
+        if img_min < global_min:
+            global_min = img_min
+
+        if flat.size > k:
+            local_topk = np.partition(flat, -k)[-k:]
+        else:
+            local_topk = flat
+
+        if topk.size == 0:
+            topk = local_topk.astype(np.float32, copy=False)
+        else:
+            merged = np.concatenate((topk, local_topk.astype(np.float32, copy=False)))
+            if merged.size > k:
+                topk = np.partition(merged, -k)[-k:]
+            else:
+                topk = merged
+
+    if not np.isfinite(global_min):
+        return 0.0, 0.0
+
+    if topk.size == 0:
+        return float(global_min), float(global_min)
+
+    max_val = float(np.percentile(topk, percentile))
+    return float(global_min), max_val
 
 def plot_original_brightest_el(images, output_file='el_brightest_darkest_original.png'):
     print("\nBrightest and darkest ORIGINAL EL images per group:")
@@ -130,13 +196,8 @@ def normalize_images(images):
             if not all_images:
                 continue
             
-            # Flatten all images to find group-wide min and max for this group-band
-            all_pixels = np.concatenate([img.flatten() for img in all_images])
-            # Use percentiles instead of absolute min/max to ignore outlier bright pixels
-            min_val = all_pixels.min()
-            last_pixels = (np.sort(all_pixels)[-100:])
-            print(last_pixels)
-            max_val = np.percentile(last_pixels, 30)  # 50th percentile for max brightest 100 pixels
+            # Compute robust normalization stats without global full-array sort.
+            min_val, max_val = compute_min_and_topk_percentile(all_images, k=100, percentile=30)
             print(f"\n{group}-{band}: min={min_val:.2f}, max={max_val:.2f} (using 0.-99.99 percentiles)")
             # Normalize each image using group-wide min and max
 
@@ -212,12 +273,16 @@ def save_normalized_images(normalized_images, output_folder='normalized_images')
     if not output_path.exists():
         output_path.mkdir()
 
+    band_folders = {}
+    for band in BANDS:
+        out_folder = output_path / band
+        out_folder.mkdir(exist_ok=True)
+        band_folders[band] = out_folder
+
     for group in normalized_images.keys():
         for band in BANDS:
             for filename, norm_img, _ in normalized_images[group][band]:
-                out_folder = output_path / band 
-                if not out_folder.exists():
-                    out_folder.mkdir()
+                out_folder = band_folders[band]
                 output_file =  out_folder / f"{Path(filename).stem}_normalized{Path(filename).suffix}"
                 if band == 'EL':
                     # Ensure EL image is 2D before saving as grayscale
@@ -276,6 +341,24 @@ def plot_normalized_brightest_el(normalized_images, output_file='el_brightest_da
 
     
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--panel", default="24-P10-A", type=str, help="Panel name, e.g. 23-P09-A")
+    args = parser.parse_args()
+    panel = args.panel
+    one_drive_path = "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage/bboxes/"
+    fpath = os.path.join(one_drive_path, panel)
+    groups = get_groups_from_filenames(fpath.rstrip('/'))
+    print(f"Detected groups in {panel}: {groups}")
+
+    IMAGE_FOLDERS = [
+    #{"path": "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage/bboxes/23-P09-D/", "groups": ['D1', 'D2', 'D3', 'D4', 'D5']},
+    #{"path": "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage/bboxes/24-P10-A/", "groups": ['A1', 'A2', 'A3', 'A4', 'A5', 'A6']},
+    #{"path": "/Users/eagle/Library/CloudStorage/OneDrive-SharedLibraries-FFHS/eagle-bfe - data/Webpage/bboxes/25-019-A/", "groups": ['A1', 'A2']}
+    {"path": fpath, "groups": groups  }
+
+    ]
+    
+
     for folder_cfg in IMAGE_FOLDERS:
         image_folder = folder_cfg["path"]
         folder_name = Path(image_folder.rstrip('/')).name
@@ -285,7 +368,7 @@ def main():
         norm_dir = Path("normalized_images") / folder_name
         norm_dir.mkdir(parents=True, exist_ok=True)
         print(f"\n[1/4] Loading images from {image_folder} ...")
-        images = load_images_by_group_and_band(image_folder, folder_cfg["groups"])
+        images = load_images_by_group_and_band(image_folder, panel, folder_cfg["groups"])
         # Count loaded images
         total = sum(len(images[g][b]) for g in images.keys() for b in BANDS)
         print(f"\nTotal images loaded: {total}")

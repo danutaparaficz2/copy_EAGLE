@@ -10,7 +10,7 @@ import io
 # Option 2: Load .env from a specific path
 load_dotenv('/Users/eagle/Documents/.env')
 # Directory containing images to classify
-panel=os.getenv('PANEL', '23-P09-D')
+panel=os.getenv('PANEL', '25-019-A')
 IMAGE_DIR = (f"/Users/eagle/Documents/eagle-classification/normalized_images/{panel}/EL/")
 # Output CSV file
 OUTPUT_CSV = (f"/Users/eagle/Documents/eagle-classification/OPENAI/{panel}/classification_results_EL_{panel}.csv")
@@ -30,7 +30,8 @@ LABEL_MAP = {
     'dark': 3,
     'corrosion': 4,
     'discoloration': 5,
-    'delamination': 6
+    'delamination': 6,
+    'undefined': 9
 }
 
 
@@ -146,25 +147,22 @@ def classify_image(client: OpenAI, image_path: str) -> str:
 
     Do NOT classify the following as defects:
     - normal vertical EL stripe patterns
-    - uniform intensity variations
     - faint texture lines aligned with cell structure
-    - busbar shadows
-    - imaging noise
 
     Defect definitions:
     Crack: a clearly visible, continuous, irregular fracture line not aligned with gridlines.
     Cross: a broken gridline or busbar segment forming a short cross-like interruption.
-    Dark: a large, clearly darker region significantly darker than surroundings.
-    Corrosion: visible oxidation or discoloration near busbars or fingers.
-
+    Dark: significant in size areas with clearly darker region.
+    Corrosion: visible oxidation specially near busbars or fingers.
+    Undefined: if the defect is not clearly defined or is ambiguous return Undefined
     Return only:
     - good
     - Crack
     - Cross
     - Dark
     - Corrosion
-
-    If no clear defect is present, return: good.
+    - Undefined: if the defect is not clearly defined or is ambiguous return Undefined
+    If cell is in good condition and  eaqally illuminated return: good.
     """
 
     try:
@@ -176,8 +174,12 @@ def classify_image(client: OpenAI, image_path: str) -> str:
                 {
                     "role": "system",
                     "content": "You are a strict industrial solar cell EL defect inspector. "
-                            "Be conservative. Only report defects that are clearly visible and unambiguous. "
-                            "If uncertain, return 'good'."
+                            "Be conservative. Only report defects that are clearly visible and unambiguous. And return good only if the cell is in good condition and "
+                            "eaqally illuminated. Do NOT classify the following as defects: normal vertical EL stripe patterns, faint texture lines aligned with cell structure. "
+                            "Defect definitions: Crack: a clearly visible, continuous, irregular fracture line not aligned with gridlines. "
+                            "Cross: a broken gridline or busbar segment forming a short cross-like interruption. Dark: significant in size areas with clearly darker region. "
+                            "Corrosion: visible oxidation specially near busbars or fingers."
+                            "If uncertain, return 'Undefined'."
                 },
                 {
                     "role": "user",
@@ -221,7 +223,7 @@ def main():
         return
 
     print(f"Found {len(image_files)} image(s) in {IMAGE_DIR}")
-    print(f"Results will be saved to {OUTPUT_CSV}")
+    sorted_image_files = sorted(image_files, key=lambda x: x.name)
 
     client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
 
@@ -230,8 +232,8 @@ def main():
         writer = csv.writer(csvfile)
         writer.writerow(["filename", "classification"])
 
-        for i, image_path in enumerate(image_files, 1):
-            print(f"[{i}/{len(image_files)}] Classifying {image_path.name}...", end=" ")
+        for i, image_path in enumerate(sorted_image_files, 1):
+            print(f"[{i}/{len(sorted_image_files)}] Classifying {image_path.name}...", end=" ")
             result = classify_image(client, str(image_path))
             print(f"Result: {result} for {image_path.name}")
             writer.writerow([image_path.name, result])
