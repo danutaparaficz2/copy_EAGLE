@@ -6,17 +6,28 @@ import os
 import csv
 import json
 import base64
+import argparse
 from pathlib import Path
 from flask import Flask, jsonify, request
 from PIL import Image
 import io
 
+parser = argparse.ArgumentParser(description="Web-based classification review tool")
+parser.add_argument("--panel", default="23-P09-C", help="Panel name (e.g. 23-P09-C)")
+parser.add_argument("--mode", default="VIT", choices=["VI", "VIT"], help="Mode (VI or VIT)")
+args = parser.parse_args()
+
 app = Flask(__name__)
 
 # Configuration
-PANEL = "23-P09-C"
-MODE = "EL"
-IMAGE_FOLDER = Path(f"normalized_images/{PANEL}/{MODE}")
+PANEL = args.panel
+MODE = args.mode
+if MODE == "VIT":
+    IMAGE_FOLDER = Path(f"normalized_images/{PANEL}/EL")
+elif MODE == "VI":
+    IMAGE_FOLDER = Path(f"normalized_images/{PANEL}/VI")
+else:
+    raise ValueError("Invalid mode. Choose 'VI' or 'VIT'.")
 LABELS_CSV = Path(f"OPENAI/{PANEL}/classification_results_{MODE}_{PANEL}.csv")
 APPROVED_CSV = Path(f"OPENAI/{PANEL}/approved_classifications_{MODE}_{PANEL}.csv")
 WRONG_CSV = Path(f"OPENAI/{PANEL}/wrong_classifications_{MODE}_{PANEL}.csv")
@@ -509,6 +520,7 @@ def api_image():
     """Get image as base64."""
     filename = request.args.get('filename', '')
     img_path = IMAGE_FOLDER / filename
+    print(f"[IMAGE] {img_path}")
     img_b64 = image_to_base64(img_path)
     return jsonify({'image': img_b64})
 
