@@ -21,4 +21,9 @@ predictions/
 working*/
 saved*/
 multimodal_output/
+normalized_images/
 OPENAI/
+*.csv
+*.pkl
+*.pyc
+*.cpython*
