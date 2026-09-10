@@ -235,8 +235,8 @@ def ploting_training_results(trainer, outfolder, last_checkpoint='', accuracies=
 def plot_samples_from_all_labels_with_acc(ds_val, predlabels, class_accuracies, data_name='Unknown', outfolder='./Data', certainty= None):
     unique_labels = list(class_accuracies.keys())
     for label in unique_labels:
-        if class_accuracies.get(label) == 0.:
-            break
+        # if class_accuracies.get(label) == 0.:
+        #     break
         selected_images, selected_predlabels, selected_certainty = select_images_by_label(ds_val, predlabels, label, certainty=certainty) # selects images that originally are labeled in specific label
 
 
@@ -329,12 +329,12 @@ def plot_samples_from_specific_label_with_acc(ds_val, predlabels, label_to_filte
         # Scale image from mean~0, std~1 to [0, 1] for display
         image = (image - image.min()) / (image.max() - image.min() + 1e-8) * 255
         ax[idx].imshow(image, cmap='gray')
-        if certainty is not None:
-            certainty_value = certainty[index][predlabels[index][0]]
-            certainty_value_for_ground_truth = certainty[index][label_to_filter]
-            ax[idx].set_title(f"G: {label_to_filter} ({certainty_value_for_ground_truth:.2f})\nP: {predlabels[index]} ({certainty_value:.2f})", fontsize=19)
-        else:
-            ax[idx].set_title(f"G: {label_to_filter}\nP: {predlabels[index]}", fontsize=19)
+        # if certainty is not None:
+        #     certainty_value = certainty[index][predlabels[index][0]]
+        #     certainty_value_for_ground_truth = certainty[index][label_to_filter]
+        #     ax[idx].set_title(f"G: {label_to_filter} ({certainty_value_for_ground_truth:.2f})\nP: {predlabels[index]} ({certainty_value:.2f})", fontsize=19)
+        # else:
+        ax[idx].set_title(f"G: {label_to_filter}\nP: {predlabels[index]}", fontsize=19)
         ax[idx].axis('off')
 
     # Hide any unused subplots

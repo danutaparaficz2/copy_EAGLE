@@ -1,3 +1,4 @@
+from cProfile import label
 from sklearn.metrics import f1_score, accuracy_score, log_loss
 import os
 os.environ["TRANSFORMERS_NO_TF"] = "1"
@@ -1212,18 +1213,16 @@ def calculate_per_channel_stats(data, resize_to=(224, 224)):
     """
     Calculate the mean and standard deviation for each channel across the entire dataset.
     Accepts either a list of (img, label) tuples, (img,) tuples, or a list of images.
-    All images are resized to `resize_to` before stacking.
-    Handles multi-channel images (e.g., 7-channel) by resizing each channel separately.
+    Computes stats on original images (no resizing) to avoid artifacts.
+    Handles (C, H, W) and (H, W, C) formats.
+    Returns statistics in [0, 1] range (normalized from raw pixel values).
     """
     print("Calculating per-channel statistics across the entire dataset...")
 
-    image_tensors = []
-    resize_transform = transforms.Compose([
-        transforms.Resize(resize_to),
-        transforms.ToTensor()
-    ])
-
-    for entry in tqdm(data, desc="Stacking images"):
+    # Collect all pixel values per channel
+    channel_pixels = None  # Will initialize based on first image
+    
+    for entry in tqdm(data, desc="Collecting pixel values"):
         # Accept (img, label), (img,), or img only
         if isinstance(entry, tuple):
             if len(entry) == 2:
@@ -1235,59 +1234,81 @@ def calculate_per_channel_stats(data, resize_to=(224, 224)):
         else:
             img = entry
 
-        if isinstance(img, np.ndarray):
-            # If shape is (H, W, C) and C > 4, process each channel separately
-            if img.ndim == 3 and img.shape[-1] == 224:
-                channels = []
-                for ch in range(img.shape[0]):
-                    channel_img = Image.fromarray(img[ch, :, :].astype(np.uint8), mode='L')
-                    channel_tensor = resize_transform(channel_img)  # (1, H, W)
-                    channels.append(channel_tensor)
-                img_tensor = torch.cat(channels, dim=0)  # (C, H, W)
-            elif img.ndim == 3 and img.shape[-1] > 4:
-                channels = []
-                for ch in range(img.shape[-1]):
-                    channel_img = Image.fromarray(img[:, :, ch].astype(np.uint8), mode='L')
-                    channel_tensor = resize_transform(channel_img)  # (1, H, W)
-                    channels.append(channel_tensor)
-                img_tensor = torch.cat(channels, dim=0)  # (C, H, W)
-            elif img.ndim == 3 and img.shape[-1] in [1, 3, 4]:
-                img_pil = Image.fromarray(img.astype(np.uint8))
-                img_tensor = resize_transform(img_pil)  # (C, H, W)
-            elif img.ndim == 2:
-                img_pil = Image.fromarray(img.astype(np.uint8))
-                img_tensor = resize_transform(img_pil).unsqueeze(0)
-            else:
-                img_tensor = torch.tensor(img, dtype=torch.float32)
-        elif isinstance(img, torch.Tensor):
-            img_tensor = img.float()
-        else:
+        # Convert to numpy array if needed
+        if isinstance(img, torch.Tensor):
+            img = img.numpy()
+        elif not isinstance(img, np.ndarray):
             raise TypeError(f"Unsupported image type: {type(img)}")
-        image_tensors.append(img_tensor)
 
-    all_images_stacked = torch.stack(image_tensors)
+        # Detect format and convert to (C, H, W)
+        if img.ndim == 2:
+            # Grayscale (H, W) -> (1, H, W)
+            img_chw = img[np.newaxis, :, :]
+        elif img.ndim == 3:
+            # Check if (C, H, W) or (H, W, C)
+            if img.shape[0] in [1, 3, 4, 7] and img.shape[0] < min(img.shape[1], img.shape[2]):
+                # Already (C, H, W)
+                img_chw = img
+            elif img.shape[2] in [1, 3, 4, 7] and img.shape[2] < min(img.shape[0], img.shape[1]):
+                # (H, W, C) -> (C, H, W)
+                img_chw = np.transpose(img, (2, 0, 1))
+            else:
+                # Ambiguous - assume (H, W, C) if last dim is small
+                if img.shape[2] <= img.shape[0] and img.shape[2] <= img.shape[1]:
+                    img_chw = np.transpose(img, (2, 0, 1))
+                else:
+                    img_chw = img
+        else:
+            raise ValueError(f"Unexpected image shape: {img.shape}")
 
-    mean = all_images_stacked.mean(dim=[0, 2, 3])
-    std = all_images_stacked.std(dim=[0, 2, 3])
+        # Initialize channel_pixels list on first image
+        if channel_pixels is None:
+            num_channels = img_chw.shape[0]
+            channel_pixels = [[] for _ in range(num_channels)]
 
-    print(f"Calculated Mean per channel: {mean}")
-    print(f"Calculated Std per channel: {std}")
+        # Collect all pixels from each channel
+        for c in range(img_chw.shape[0]):
+            channel_pixels[c].extend(img_chw[c].flatten().tolist())
 
-    return mean.tolist(), std.tolist()
+    # Calculate mean and std per channel, normalize to [0, 1]
+    num_channels = len(channel_pixels)
+    means = []
+    stds = []
+    
+    for c in range(num_channels):
+        pixels_array = np.array(channel_pixels[c], dtype=np.float32)
+        mean_val = pixels_array.mean() / 255.0  # Normalize to [0, 1]
+        std_val = pixels_array.std() / 255.0    # Normalize to [0, 1]
+        means.append(mean_val)
+        stds.append(std_val)
+        print(f"  Channel {c}: mean={mean_val:.6f}, std={std_val:.6f} (from {len(pixels_array):,} pixels)")
+
+    mean_tensor = torch.tensor(means)
+    std_tensor = torch.tensor(stds)
+
+    print(f"Calculated Mean per channel (normalized): {mean_tensor}")
+    print(f"Calculated Std per channel (normalized): {std_tensor}")
+
+    return mean_tensor.tolist(), std_tensor.tolist()
 
 def just_transform_with_norm(data, calculated_mean, calculated_std, resize_to=(224, 224)):
     """
-    Transform and normalize multi-channel images (e.g., 7-channel Website data).
+    Transform and normalize multi-channel images (e.g., 4-channel Website data).
     Applies resizing and normalization directly to tensors.
+    Input expected as (C, H, W) format.
     """
     from torchvision.transforms.functional import resize
 
     tensors = []
     labels = []
     for img, label in tqdm(data, desc="Normalizing images"):
-        # Convert to float tensor and permute to (C, H, W)
+        # Convert to float tensor - input should already be (C, H, W)
         if isinstance(img, np.ndarray):
-            if img.ndim == 3 and img.shape[-1] == len(calculated_mean):
+            if img.ndim == 3 and img.shape[0] == len(calculated_mean):
+                # Already in (C, H, W) format
+                img_tensor = torch.tensor(img, dtype=torch.float32)
+            elif img.ndim == 3 and img.shape[-1] == len(calculated_mean):
+                # (H, W, C) format - permute to (C, H, W)
                 img_tensor = torch.tensor(img, dtype=torch.float32).permute(2, 0, 1)
             elif img.ndim == 2:
                 img_tensor = torch.tensor(img, dtype=torch.float32).unsqueeze(0)
