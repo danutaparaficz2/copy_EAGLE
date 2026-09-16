@@ -176,9 +176,6 @@ def classify_image(client: OpenAI, image_path: str) -> str:
                     "content": "You are a strict industrial solar cell EL defect inspector. "
                             "Be conservative. Only report defects that are clearly visible and unambiguous. And return good only if the cell is in good condition and "
                             "eaqally illuminated. Do NOT classify the following as defects: normal vertical EL stripe patterns, faint texture lines aligned with cell structure. "
-                            "Defect definitions: Crack: a clearly visible, continuous, irregular fracture line not aligned with gridlines. "
-                            "Cross: a broken gridline or busbar segment forming a short cross-like interruption. Dark: significant in size areas with clearly darker region. "
-                            "Corrosion: visible oxidation specially near busbars or fingers."
                             "If uncertain, return 'Undefined'."
                 },
                 {
