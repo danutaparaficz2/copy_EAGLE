@@ -27,3 +27,6 @@ OPENAI/
 *.pkl
 *.pyc
 *.cpython*
+
+swiss_smart_meter_data/
+!Qwen/**/*.png
